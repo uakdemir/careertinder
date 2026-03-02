@@ -1,0 +1,27 @@
+{
+  "model": "opusplan",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f server/tsconfig.json ]; then (cd server && npx tsc --noEmit 2>&1 | head -20); else npx tsc --noEmit 2>&1 | head -20; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -m1 '^- Next action:' CLAUDE.md 2>/dev/null || echo '[Status] Next action not set — update CLAUDE.md'"
+          }
+        ]
+      }
+    ]
+  }
+}

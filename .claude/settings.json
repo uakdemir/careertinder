@@ -1,0 +1,62 @@
+{
+  "model": "opus",
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Find",
+      "Grep",
+      "Bash(python *)",
+      "Bash(pip *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(alembic *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git clone *)",
+      "Bash(streamlit *)",
+      "Bash(playwright *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "WebFetch(domain:docs.apify.com)",
+      "WebFetch(domain:docs.python.org)",
+      "WebFetch(domain:docs.pydantic.dev)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(rm *)",
+      "Bash(git commit *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f pyproject.toml ]; then ruff check --select E,F --quiet . 2>&1 | head -20; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -m1 '^- Next action:' CLAUDE.md 2>/dev/null || echo '[Status] Next action not set — update CLAUDE.md'"
+          }
+        ]
+      }
+    ]
+  }
+}
