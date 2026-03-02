@@ -1,0 +1,67 @@
+# JobHunter Configuration
+# Copy this file to config.yaml and customize for your setup.
+# API keys belong in .env (never in this file).
+
+scraping:
+  remote_io:
+    enabled: true
+    base_url: "https://remote.io/remote-jobs"
+    max_pages: 10
+    delay_seconds: 2
+  remote_rocketship:
+    enabled: true
+    base_url: "https://www.remoterocketship.com"
+    max_pages: 10
+    delay_seconds: 2
+  wellfound:
+    enabled: true
+    apify_actor_id: "shahidirfan/wellfound-jobs-scraper"
+    max_results: 100
+  linkedin:
+    enabled: true
+    apify_actor_id: "apify/linkedin-jobs-scraper"
+    max_results: 100
+
+filtering:
+  salary_min_usd: 90000
+  location_keywords:
+    include: ["remote", "worldwide", "anywhere", "turkey", "europe", "emea"]
+    exclude: ["us only", "us-based only", "must be in us"]
+  title_whitelist: ["architect", "principal", "staff", "lead", "director", "vp", "head of", "manager"]
+  title_blacklist: ["intern", "junior", "entry level"]
+  company_blacklist: []
+
+ai_models:
+  tier2:
+    provider: "anthropic"
+    model: "claude-3-5-haiku-latest"
+    max_tokens: 300
+    temperature: 0.1
+  tier3:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 2000
+    temperature: 0.3
+  content_gen:
+    provider: "openai"
+    model: "gpt-4o"
+    max_tokens: 2000
+    temperature: 0.5
+
+database:
+  path: "data/jobhunter.db"
+  echo_sql: false
+
+dashboard:
+  port: 8501
+  page_size: 25
+
+scheduling:
+  run_interval_hours: 12
+  retry_failed_scrapers: true
+  max_retries: 2
+
+notifications:
+  enabled: false
+  method: "email"
+  min_score_to_notify: 80

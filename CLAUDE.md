@@ -27,9 +27,10 @@ Store short, active plans in `tmp/ai_communications/implementation_plans/` as ch
 
 ## Project Status
 
-- Current milestone: M0 (Foundation & Project Setup) — analysis complete, awaiting implementation
-- Completed: all architecture docs (components, ADRs, roadmap, user stories, risk analysis), M0 detailed analysis reviewed and fixed (2 rounds of Codex review)
-- Next action: implement M0 per `tmp/ai/temp/hobby/resume_matcher/analysis/r1/m0.md`
+- Current milestone: M0 (Foundation & Project Setup) — **implemented**
+- Completed: all architecture docs, M0 implementation (all 7 deliverables: scaffold, config, logging, DB layer with 11 models + Alembic, resume extraction, CLI, 31 tests passing)
+- Verification: ruff check (0 errors), mypy (0 errors), pytest (31/31 passed)
+- Next action: user review of M0 implementation, then proceed to M1 analysis
 
 ---
 
