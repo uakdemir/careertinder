@@ -1,0 +1,81 @@
+[
+  {
+    "id": "4227647589",
+    "title": "VP of Engineering",
+    "linkedinUrl": "https://www.linkedin.com/jobs/view/4227647589",
+    "descriptionText": "Lead engineering organization of 50+ engineers. Drive technical strategy and execution.",
+    "descriptionHtml": "<p>Lead engineering organization of 50+ engineers.</p>",
+    "company": {
+      "id": "12345",
+      "name": "MegaTech",
+      "universalName": "megatech",
+      "linkedinUrl": "https://www.linkedin.com/company/megatech",
+      "employeeCount": 500,
+      "employeeCountRange": "201-500"
+    },
+    "salary": {
+      "text": "$180,000 - $250,000",
+      "min": 180000,
+      "max": 250000,
+      "currency": "USD",
+      "payPeriod": "YEARLY"
+    },
+    "location": {
+      "linkedinText": "Remote - Worldwide",
+      "countryCode": null
+    },
+    "postedDate": "2025-01-15",
+    "workplaceType": "remote",
+    "employmentType": "full_time"
+  },
+  {
+    "id": "4227647590",
+    "title": "Solutions Architect",
+    "linkedinUrl": "https://www.linkedin.com/jobs/view/4227647590",
+    "descriptionText": "Design cloud-native solutions for enterprise clients. AWS, Azure, GCP expertise required.",
+    "descriptionHtml": "<p>Design cloud-native solutions for enterprise clients.</p>",
+    "company": {
+      "id": "67890",
+      "name": "CloudNative Corp",
+      "universalName": "cloudnative-corp",
+      "linkedinUrl": "https://www.linkedin.com/company/cloudnative-corp",
+      "employeeCount": 200
+    },
+    "salary": null,
+    "location": {
+      "linkedinText": "Remote - Europe",
+      "countryCode": "EU"
+    },
+    "postedDate": "2025-01-14",
+    "workplaceType": "remote",
+    "employmentType": "full_time"
+  },
+  {
+    "id": "4227647591",
+    "title": null,
+    "linkedinUrl": "https://www.linkedin.com/jobs/view/4227647591",
+    "descriptionText": "This item has no title and should be skipped.",
+    "company": {
+      "name": "Unknown Corp"
+    },
+    "salary": null,
+    "location": {
+      "linkedinText": "Remote"
+    }
+  },
+  {
+    "id": "4227647592",
+    "title": "Engineering Manager",
+    "linkedinUrl": "https://www.linkedin.com/jobs/view/4227647592",
+    "descriptionText": "This item has no company and should be skipped.",
+    "company": null,
+    "salary": {
+      "text": "$120,000",
+      "min": 120000,
+      "currency": "USD"
+    },
+    "location": {
+      "linkedinText": "Remote"
+    }
+  }
+]

@@ -8,7 +8,7 @@
 
 ## Hotspots
 
-Canonical map: `.claude/hotspots.md`. Main entry: `run.py`. Dashboard entry: `src/dashboard/app.py`.
+Canonical map: `.claude/hotspots.md`. Main entry: `run.py`. Dashboard entry: `jobhunter/dashboard/app.py`.
 
 ## Review Fixes Workflow
 
@@ -25,12 +25,40 @@ I'm continuing from a previous session. Current status: <one-liner>. Pick up whe
 
 Store short, active plans in `tmp/ai_communications/implementation_plans/` as checkbox lists. Delete/archive when done.
 
+## Automated Workflow (MUST FOLLOW)
+
+### After EVERY prompt exchange:
+1. **TodoWrite**: Update todo list with current task status
+2. **Implementation Notes**: Log significant decisions to `tmp/ai_communications/temp/peaka/onboarding/analysis/r1/implementation_notes/{milestone}_implementation.md`
+3. **Implementation Plan**: Update checkbox status in `tmp/ai_communications/implementation_plans/`
+
+### When starting new implementation work:
+1. Create/update implementation plan in `tmp/ai_communications/implementation_plans/{feature}.md`
+2. Break down into checkbox items with effort estimates
+3. Follow the plan sequentially
+
+### Decision logging format (in implementation notes):
+```markdown
+| Date | Decision | Context | Outcome |
+|------|----------|---------|---------|
+| YYYY-MM-DD | What was decided | Why it was needed | Result |
+```
+
+### At session end:
+1. Update CLAUDE.md Project Status
+2. Clear completed todos
+3. Ensure implementation_notes reflects all changes made
+
 ## Project Status
 
-- Current milestone: M0 (Foundation & Project Setup) — **implemented**
-- Completed: all architecture docs, M0 implementation (all 7 deliverables: scaffold, config, logging, DB layer with 11 models + Alembic, resume extraction, CLI, 31 tests passing)
-- Verification: ruff check (0 errors), mypy (0 errors), pytest (31/31 passed)
-- Next action: user review of M0 implementation, then proceed to M1 analysis
+- Current milestone: M1.5 (Dashboard Companion) + Scraper Enhancement — all implemented, uncommitted on `master`
+- Completed: M0 (committed), M1 (all 8 deliverables, uncommitted), M1.5 (D1-D7, uncommitted), Scraper Enhancement (LinkedIn multi-profile + HarvestAPI)
+- Verification (2026-03-03): ruff check (0 errors), mypy (0 errors, 66 source files), pytest (171 passed)
+- Branch: `master` — M1 + M1.5 + scraper enhancement in working tree (unstaged), need commit
+- DB: up to date (alembic upgrade head done, settings table seeded)
+- LinkedIn: switched to HarvestAPI actor (harvestapi/linkedin-job-search) with multi-profile structured queries, weight-based budget allocation, cross-profile dedup, URL parser convenience tool
+- Wellfound: deferred (all Apify actors require manual cookie/CAPTCHA), set enabled=false
+- Next action: commit M1+M1.5+scraper changes, then M2 (Tier 1 filter engine)
 
 ---
 
@@ -60,6 +88,7 @@ Store short, active plans in `tmp/ai_communications/implementation_plans/` as ch
 19. Use `logging` module with named loggers per module (`logging.getLogger(__name__)`). Never use `print()` for operational output.
 20. Scrapers must respect rate limits, implement retry with backoff, and catch `playwright.TimeoutError` explicitly.
 21. All AI API calls must log model, token counts, and estimated cost. Enforce cost caps before making calls.
+22. Keep UI changes consistent with existing design system/components; ensure accessibility basics (labels, keyboard focus, empty/loading/error states).
 
 ---
 
@@ -88,7 +117,7 @@ Target profile: senior tech professional, remote positions from Turkey, $90K+ sa
 
 - `docs/architecture/components_r1.md` — Components (C0–C11) and Data Structures (DS1–DS11)
 - `docs/architecture/adrs.md` — All architectural decision records (ADR-001–ADR-016)
-- `docs/project_management/r1/release_roadmap.md` — Milestones M0–M7
+- `docs/project_management/r1/release_roadmap.md` — Milestones M0–M1.5–M2–M7
 - `tmp/ai/temp/hobby/resume_matcher/analysis/r1/user_stories.md` — User stories by epic
 
 ### Project Structure (target)
@@ -133,3 +162,7 @@ run.py                      # CLI entry point
 - Analysis-first: for each milestone, clarify requirements → approve folder structure → implement
 - Prompt templates for review workflows stored in `tmp/ai_communications/prompts/`
 - Build verification: `ruff check .` + `mypy .` + `pytest` after each implementation task
+
+### Parallel UI Philosophy
+
+Every backend milestone gets a corresponding UI surface immediately. The dashboard grows incrementally alongside the backend — it is not a deferred monolith. When implementing a backend milestone (M2, M3, M4, etc.), also extend the existing Streamlit dashboard with pages that expose the new data and functionality. See `docs/project_management/r1/release_roadmap.md` (Parallel UI Philosophy section) for the full mapping.

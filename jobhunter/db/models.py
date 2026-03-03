@@ -271,7 +271,7 @@ class ScraperRun(Base):
     status: Mapped[str] = mapped_column(
         String,
         CheckConstraint(
-            "status IN ('running', 'success', 'partial_success', 'failed', 'timeout', 'blocked')"
+            "status IN ('running', 'success', 'partial_success', 'failed', 'timeout', 'blocked', 'cancelled')"
         ),
         nullable=False,
         default="running",

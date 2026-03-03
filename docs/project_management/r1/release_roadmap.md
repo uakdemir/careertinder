@@ -2,7 +2,7 @@
 
 > **Project:** Job Search Automation Platform (JobHunter)
 > **Version:** R1 (Initial Release)
-> **Last Updated:** 2026-03-02
+> **Last Updated:** 2026-03-03
 > **Target Platform:** Windows (local execution)
 
 ## Overview
@@ -34,21 +34,37 @@ JobHunter is a locally-run job search automation platform that scrapes postings 
 | --------- | ----------------------------- | ---------- | ------------- | ---------- | ---------- |
 | M0        | Foundation & Project Setup    | S          | 2-3 hours     | --         | Day 1      |
 | M1        | Scraper Infrastructure        | L          | 2-3 days      | M0         | Day 4      |
-| M2        | Tier 1 Rule-Based Filtering   | S          | 2-4 hours     | M1         | Day 4      |
-| M3        | AI Evaluation Pipeline        | M          | 3-5 hours     | M2         | Day 5      |
-| M4        | Content Generation            | S          | 2-3 hours     | M3         | Day 5      |
-| M5        | Dashboard (Minimal)           | M          | 4-6 hours     | M4         | Day 6      |
-| M6        | Automation & Scheduling       | S          | 1-2 hours     | M5         | Day 6      |
-| M7        | Integration Testing & Fixes   | M          | 1-2 days      | M6         | Day 7-8    |
+| M1.5      | Dashboard Companion (Early UI)| M          | 4-6 hours     | M0, M1     | Day 5      |
+| M2        | Tier 1 Rule-Based Filtering   | S          | 2-4 hours     | M1         | Day 5      |
+| M3        | AI Evaluation Pipeline        | M          | 3-5 hours     | M2         | Day 6      |
+| M4        | Content Generation            | S          | 2-3 hours     | M3         | Day 6      |
+| M5        | Dashboard Review Workflow     | M          | 3-4 hours     | M4, M1.5   | Day 7      |
+| M6        | Automation & Scheduling       | S          | 1-2 hours     | M5         | Day 7      |
+| M7        | Integration Testing & Fixes   | M          | 1-2 days      | M6         | Day 8-9    |
 
 **Total estimated duration: 7-10 days (1-1.5 weeks)**
 
 ### Why this is achievable
 
 - M0, M2, M3, M4, M6 are **deterministic code** — Claude Opus writes ORM models, rule engines, API wrappers, prompt templates, and Streamlit pages in single sessions with no ambiguity.
-- M5 (Dashboard) is kept **minimal for MVP** — a functional table view with filters and status actions, not a polished multi-page app. Streamlit is fast to build.
+- **M1.5 introduces the dashboard early** — the UI grows incrementally alongside the backend rather than being a monolithic M5 build. Each backend milestone extends the existing dashboard with new pages.
+- M5 (Dashboard Review Workflow) is now **reduced in scope** — it only adds the job review, approve/reject, and ready-to-apply views on top of the existing M1.5 dashboard shell.
 - **M1 (Scrapers) is the bottleneck** — the only milestone requiring iterative live testing against real websites. See `risky_components.md` for mitigation.
 - M7 absorbs scraper fixes, integration issues, and prompt tuning discovered during real use.
+
+### Parallel UI Philosophy
+
+**Every backend milestone gets a corresponding UI surface immediately.** The dashboard is not a deferred monolith — it grows incrementally:
+
+| Backend Milestone | UI Surface Added |
+|---|---|
+| M0 | Resume upload, DB status (via M1.5) |
+| M1 | Raw job browser, scraper runs, scraper config, trigger scrape (via M1.5) |
+| M2 | Filter results view, rule config editor (M2 extends dashboard) |
+| M3 | Evaluation results, cost tracker (M3 extends dashboard) |
+| M4 | Cover letter viewer, "why company" viewer (M4 extends dashboard) |
+| M5 | Job review workflow, approve/reject, ready-to-apply (extends dashboard) |
+| M6 | Pipeline status, scheduling config (extends dashboard) |
 
 ### MVP Scope Cuts (deferred to post-MVP)
 
@@ -70,29 +86,22 @@ JobHunter is a locally-run job search automation platform that scrapes postings 
 ```
 M0 (Foundation)
  |
- v
-M1 (Scrapers)
- |
- v
-M2 (Rule Filtering)
- |
- v
-M3 (AI Evaluation)
- |
- v
-M4 (Content Generation)
- |
- v
-M5 (Dashboard)
- |
- v
-M6 (Automation)
- |
- v
-M7 (Polish)
+ +---> M1 (Scrapers) ---> M2 (Rule Filtering) ---> M3 (AI Evaluation)
+ |         |                                             |
+ |         v                                             v
+ |     M1.5 (Early UI) --------+               M4 (Content Generation)
+ |                              |                        |
+ |                              v                        v
+ |                          M5 (Review Workflow) <-------+
+ |                              |
+ |                              v
+ |                          M6 (Automation)
+ |                              |
+ |                              v
+ |                          M7 (Polish)
 ```
 
-The dependency chain is strictly linear but execution is fast since Claude Opus generates all code. The primary constraint is **user availability for live testing** (scrapers, credentials, API keys).
+The backend pipeline (M1→M2→M3→M4) is linear. M1.5 branches off after M1 to provide early UI, then M5 merges both tracks (M4 backend + M1.5 dashboard shell). The primary constraint is **user availability for live testing** (scrapers, credentials, API keys).
 
 ---
 
@@ -296,6 +305,69 @@ M0 (database, ORM models, config, logging).
 4. Audit log (DS9) contains accurate records for each scraper run, including job counts and timing.
 5. A deliberately failed scraper (e.g., invalid URL) is handled gracefully; other scrapers still complete.
 6. Rate limiting is observable in logs (delays between requests).
+
+---
+
+### M1.5 -- Dashboard Companion (Early UI)
+
+**Complexity: M (Medium)**
+
+#### Description
+
+Deliver a minimal but functional Streamlit dashboard that provides immediate visibility into M0 and M1 outputs. This includes resume management (upload/view/delete), scraper configuration editing, raw job browsing, scraper run audit viewing, and the ability to trigger scrapes from the UI. The dashboard shell and navigation established here will be extended by every subsequent milestone.
+
+#### Dependencies
+
+M0 (database, ORM models, config), M1 (scrapers, raw_job_postings, scraper_runs tables).
+
+#### Task List
+
+- [ ] **App scaffold + DB settings model (D1)**:
+  - [ ] Streamlit multi-page app structure under `jobhunter/dashboard/`
+  - [ ] DB-backed settings model (`DS12 SettingsEntry`) with JSON fields for scraping, filtering, scheduling, notifications
+  - [ ] Alembic migration: create `settings` table, seed defaults from Pydantic models
+  - [ ] Hybrid config loading: `config.yaml` for ai_models/database/dashboard, SQLite for operational settings
+- [ ] **Resume management page (D2)**:
+  - [ ] Upload PDF resumes, extract text via existing M0 pipeline, persist to DS8
+  - [ ] List stored resumes with metadata (filename, upload date, word count)
+  - [ ] View extracted text and delete resumes
+- [ ] **Scraper config page — DB-backed (D3)**:
+  - [ ] Load scraping config from `settings` table into structured form
+  - [ ] Per-scraper enable/disable toggles, URL/keyword/filter editing
+  - [ ] Save changes to SQLite with Pydantic validation
+- [ ] **Raw jobs browser (D4)**:
+  - [ ] Paginated table of raw_job_postings with source filter, date range, search
+  - [ ] Expandable row detail showing full description and raw HTML
+  - [ ] Basic stats: total by source, recent counts
+- [ ] **Scraper runs page (D5)**:
+  - [ ] Table of scraper_runs with status badges (success/failed/timeout/running)
+  - [ ] Expandable error details for failed runs
+  - [ ] Duration and job count columns
+- [ ] **Trigger scrape — async job (D6)**:
+  - [ ] Background thread execution with status polling
+  - [ ] Duplicate-run prevention per scraper (check for `status='running'`)
+  - [ ] Stale-job detection for orphaned `running` records
+- [ ] **Navigation shell (D7)**:
+  - [ ] Sidebar navigation with page links
+  - [ ] Placeholder pages for future milestones (Filters, Evaluations, Applications)
+  - [ ] DB connection status indicator
+
+#### Key Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+| ---- | ------ | ---------- |
+| Config editing introduces invalid YAML | Medium | Validate with Pydantic before saving; show validation errors in UI; keep backup of previous config. |
+| Streamlit subprocess for scrape triggering is fragile | Medium | Use `subprocess.run` with timeout; capture stdout/stderr; show errors clearly. |
+| Scraper runs table grows large | Low | Default to last 50 runs; add date filter and pagination. |
+
+#### Acceptance Criteria
+
+1. `streamlit run jobhunter/dashboard/app.py` launches without errors and shows sidebar navigation.
+2. A PDF resume can be uploaded, its text viewed, and the resume deleted — all from the UI.
+3. Scraper config edits made in the UI are persisted to the SQLite `settings` table and validated.
+4. Raw jobs browser shows all scraped jobs with working source filter and search.
+5. Scraper runs page shows run history with correct status and error details.
+6. Triggering a scrape from the UI starts a background job; status is polled; duplicate runs are prevented.
 
 ---
 
@@ -519,27 +591,22 @@ M3 (evaluated and scored jobs, resume recommendation, AI client wrappers).
 
 ---
 
-### M5 -- Dashboard & Review Workflow
+### M5 -- Dashboard Review Workflow
 
 **Complexity: M (Medium)**
 
 #### Description
 
-Build the Streamlit-based dashboard that serves as the primary user interface for reviewing scraped jobs, examining AI evaluations, managing application workflow status, and accessing generated materials. The dashboard also provides operational visibility into scraper health and API cost tracking. This is where the human-in-the-loop makes final decisions.
+Extend the M1.5 dashboard shell with the job review workflow: evaluated job listing with AI scores, detailed evaluation views, approve/reject/shortlist actions, "Ready to Apply" view with generated materials, and application status tracking. The app scaffold, DB connection, session state, resume pages, scraper config, and raw job browser already exist from M1.5.
 
 #### Dependencies
 
-M4 (all data: jobs, evaluations, generated content, application packages).
+M4 (evaluated jobs, generated content, application packages), M1.5 (existing dashboard shell and navigation).
 
 #### Task List
 
-- [ ] **Streamlit application setup**:
-  - [ ] Project structure for multi-page Streamlit app
-  - [ ] Session state management
-  - [ ] Database connection handling (SQLAlchemy session per request)
-  - [ ] Configurable port and host from config.yaml
-- [ ] **Job listing view**:
-  - [ ] Paginated table of all jobs
+- [ ] **Evaluated job listing view** (extends M1.5 raw jobs browser):
+  - [ ] Paginated table of processed jobs with AI scores
   - [ ] Filters: match score range, source site, date range, status, salary range, recommendation level
   - [ ] Sortable columns: score, date posted, salary, company
   - [ ] Color coding by recommendation (strong=green, good=blue, weak=yellow, no_match=red)
@@ -572,11 +639,10 @@ M4 (all data: jobs, evaluations, generated content, application packages).
   - [ ] Dashboard view: Kanban-style or pipeline funnel visualization
   - [ ] Stats: conversion rates between stages
 - [ ] *(Post-MVP)* **Cost dashboard**: token usage charts, tier/provider breakdown, budget tracking
-- [ ] *(Post-MVP)* **Scraper health dashboard**: last run status, error logs, job count trends
-- [ ] **General UI**:
+- [ ] **General UI enhancements**:
   - [ ] Loading indicators for database queries
   - [ ] Error handling with user-friendly messages
-- [ ] Write integration tests for key dashboard data queries
+- [ ] Write integration tests for review workflow data queries
 
 #### Key Risks and Mitigations
 
@@ -585,16 +651,15 @@ M4 (all data: jobs, evaluations, generated content, application packages).
 | Streamlit performance with large datasets | Medium | Paginate all list views; use database-level filtering (not Python-side); cache expensive queries. |
 | Scope creep from UX feature requests | Medium | Stick to defined task list for M5; defer enhancements to M7. |
 | Streamlit limitations for complex layouts | Low | Use st.columns, st.tabs, st.expander for layout; accept Streamlit conventions rather than fighting them. |
-| Session state bugs in multi-page app | Medium | Centralize state management; test page transitions. |
 
 #### Acceptance Criteria
 
-1. `streamlit run dashboard/app.py` launches the dashboard on the configured port.
-2. Job listing view displays all jobs with working filters (score, source, date, status, salary).
-3. Job detail view shows full evaluation data including all scoring dimensions.
-4. Clicking "Approve" or "Reject" updates job status in the database and reflects immediately in the UI.
-5. "Ready to Apply" view shows complete application package (link, resume, cover letter, "why" answer).
-6. Application status can be updated (shortlist, apply, reject) from the dashboard.
+1. Evaluated job listing view displays all processed jobs with working filters (score, source, date, status, salary).
+2. Job detail view shows full evaluation data including all scoring dimensions.
+3. Clicking "Approve" or "Reject" updates job status in the database and reflects immediately in the UI.
+4. "Ready to Apply" view shows complete application package (link, resume, cover letter, "why" answer).
+5. Application status can be updated (shortlist, apply, reject) from the dashboard.
+6. Navigation integrates seamlessly with existing M1.5 pages.
 
 ---
 

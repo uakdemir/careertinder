@@ -18,7 +18,7 @@ This document captures the key architectural decisions made for the **JobHunter*
 | ADR-006 | Dual AI Provider Strategy (Claude + OpenAI) | Accepted | 2026-03-02 |
 | ADR-007 | Streamlit for Dashboard | Accepted | 2026-03-02 |
 | ADR-008 | Job Fingerprinting for Deduplication | Accepted | 2026-03-02 |
-| ADR-009 | config.yaml for Configuration | Accepted | 2026-03-02 |
+| ADR-009 | Hybrid Configuration (YAML + SQLite) | Amended | 2026-03-03 |
 | ADR-010 | SQLAlchemy ORM | Accepted | 2026-03-02 |
 | ADR-011 | Content Versioning Strategy | Accepted | 2026-03-02 |
 | ADR-012 | Windows Task Scheduler for Automation | Accepted | 2026-03-02 |
@@ -234,28 +234,34 @@ The fingerprint is checked against the database before any processing. If a fing
 
 ---
 
-## ADR-009: config.yaml for Configuration
+## ADR-009: Hybrid Configuration (YAML + SQLite)
 
-**Status:** Accepted
+**Status:** Amended (2026-03-03) — originally "config.yaml for Configuration"
 
 ### Context
 
 The platform has numerous configurable parameters: API keys, filter rules (salary thresholds, required keywords, excluded terms), scraper schedules, model preferences, cost caps, logging levels, and file paths. These need to be easy to read, modify, and version-control.
 
+With the introduction of the Streamlit dashboard (M1.5), operational settings (scraping targets, filter rules, scheduling, notifications) need to be editable from the UI without file I/O. Infrastructure settings (AI model selection, database path, dashboard port) change rarely and benefit from file-based version control.
+
 ### Decision
 
-Use a single **`config.yaml`** file as the central configuration source for all platform settings.
+Use a **hybrid configuration** approach:
+
+- **`config.yaml`** stores infrastructure settings only: `ai_models`, `database`, `dashboard`. These are read at startup and rarely change.
+- **SQLite `settings` table** stores operational settings: `scraping`, `filtering`, `scheduling`, `notifications`. These are read/written by the dashboard UI and consumed by pipeline components at runtime.
+- **`.env`** stores secrets (API keys). Never in YAML or DB.
 
 Design principles:
-- All non-secret parameters are stored directly in the YAML file.
-- Sensitive values (API keys, credentials) are referenced via environment variable names: `api_key: ${ANTHROPIC_API_KEY}`. The configuration loader resolves these at runtime.
-- The file is structured into logical sections: `scraping`, `filtering`, `ai`, `dashboard`, `logging`, `paths`.
+- Operational settings use a single JSON blob per category, validated by Pydantic on read and write. No YAML in the database.
+- The settings table is seeded with defaults (from Pydantic models) via an Alembic migration.
+- Infrastructure settings in `config.yaml` follow the original design: human-readable, version-controllable, Pydantic-validated at load time.
 
 ### Consequences
 
-- **Positive:** Human-readable and easy to edit with any text editor. YAML supports nested structures, comments, and lists naturally. Single source of truth for all configuration. Can be version-controlled (with secrets excluded via env var references).
-- **Negative:** YAML has well-known pitfalls (implicit type coercion, indentation sensitivity). No schema validation out of the box.
-- **Mitigation:** Use `pydantic` for configuration schema validation at load time. Invalid configuration fails fast with clear error messages. A `config.example.yaml` template is provided with documentation comments.
+- **Positive:** Operational config is editable from the dashboard without file I/O or YAML corruption risk. Infrastructure config remains version-controllable. Pydantic validates both paths. Single DB holds both data and its configuration.
+- **Negative:** Two config sources add conceptual complexity. Components must know which source to read. Migration needed to seed defaults.
+- **Mitigation:** Clear split boundary: if it's tunable from the UI, it's in the DB; if it's infrastructure, it's in YAML. CRUD helpers (`get_scraping_config()`, `update_settings()`) abstract the DB access. Pydantic models are shared across both paths.
 
 ---
 

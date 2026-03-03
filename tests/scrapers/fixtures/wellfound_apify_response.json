@@ -1,0 +1,31 @@
+[
+  {
+    "title": "Head of Platform",
+    "companyName": "StartupAlpha",
+    "url": "https://wellfound.com/jobs/head-of-platform-startupalpha",
+    "description": "Lead our platform engineering team. Build scalable infrastructure.",
+    "salary": "$140,000 - $190,000",
+    "location": "Remote - Global",
+    "requirements": "10+ years experience, Kubernetes, Terraform",
+    "postedAt": "2025-01-16",
+    "companyStage": "Series B",
+    "companySize": "51-100",
+    "techStack": ["Python", "Kubernetes", "Terraform", "PostgreSQL"]
+  },
+  {
+    "jobTitle": "Senior Backend Developer",
+    "company": "BetaStartup",
+    "url": "https://wellfound.com/jobs/senior-backend-betastartup",
+    "description": "Join our backend team building APIs at scale.",
+    "compensation": "$100K-$140K + 0.5% equity",
+    "location": "Remote - US/EU",
+    "fundingStage": "Seed",
+    "teamSize": "10-20"
+  },
+  {
+    "title": null,
+    "companyName": null,
+    "url": "https://wellfound.com/jobs/invalid",
+    "description": "This item has no title or company and should be skipped."
+  }
+]

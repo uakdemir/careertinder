@@ -64,6 +64,10 @@
           {
             "type": "command",
             "command": "grep -m1 '^- Next action:' CLAUDE.md 2>/dev/null || echo '[Status] Next action not set — update CLAUDE.md'"
+          },
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"D:/01 Projects/01 Interview/01HobbyProjects/ResumeMatcher/.claude/notify.ps1\" -Message \"Claude Code finished — ready for your review\""
           }
         ]
       }

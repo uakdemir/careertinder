@@ -10,7 +10,16 @@
       "Bash(alembic:*)",
       "Bash(streamlit:*)",
       "Bash(playwright:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(.venv/Scripts/ruff check:*)",
+      "Bash(.venv/Scripts/mypy .:*)",
+      "Bash(mkdir:*)",
+      "WebSearch",
+      "WebFetch(domain:apify.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   }
 }

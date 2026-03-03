@@ -28,17 +28,35 @@ class RemoteRocketshipConfig(BaseModel):
 class WellfoundConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    enabled: bool = True
+    enabled: bool = False  # Deferred: all Apify actors require manual cookie/CAPTCHA
     apify_actor_id: str = "shahidirfan/wellfound-jobs-scraper"
     max_results: int = 100
+    search_keyword: str = "software engineer"
+    location_filter: str = "remote"
+
+
+class LinkedInSearchProfile(BaseModel):
+    """A structured LinkedIn search query for the HarvestAPI actor."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    label: str
+    job_titles: list[str]
+    locations: list[str] = []
+    workplace_type: list[str] = Field(default_factory=lambda: ["remote"])
+    experience_level: list[str] = Field(default_factory=lambda: ["mid-senior", "director"])
+    salary: str | None = None
+    posted_limit: str | None = None
+    weight: int = Field(default=1, ge=1, le=10)
 
 
 class LinkedInConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     enabled: bool = True
-    apify_actor_id: str = "apify/linkedin-jobs-scraper"
+    apify_actor_id: str = "harvestapi/linkedin-job-search"
     max_results: int = 100
+    search_profiles: list[LinkedInSearchProfile] = Field(default_factory=list)
 
 
 class ScrapingConfig(BaseModel):
@@ -48,6 +66,7 @@ class ScrapingConfig(BaseModel):
     remote_rocketship: RemoteRocketshipConfig = RemoteRocketshipConfig()
     wellfound: WellfoundConfig = WellfoundConfig()
     linkedin: LinkedInConfig = LinkedInConfig()
+    timeout_seconds: int = 600
 
 
 class LocationKeywordsConfig(BaseModel):

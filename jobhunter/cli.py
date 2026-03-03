@@ -1,10 +1,11 @@
+import asyncio
 import logging
 from pathlib import Path
 
 import click
 
 from jobhunter.config.loader import load_config
-from jobhunter.config.schema import AppConfig, ConfigurationError
+from jobhunter.config.schema import AppConfig, ConfigurationError, SecretsConfig
 from jobhunter.utils.logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -34,11 +35,46 @@ def _load_config(ctx: click.Context) -> AppConfig:
 
 
 @cli.command()
+@click.option(
+    "--scraper",
+    type=click.Choice(["remote_io", "remote_rocketship", "wellfound", "linkedin"]),
+    default=None,
+    help="Run a specific scraper (default: all enabled)",
+)
 @click.pass_context
-def scrape(ctx: click.Context) -> None:
-    """Run all enabled scrapers."""
-    _load_config(ctx)
-    click.echo("Scraping not yet implemented (M1)")
+def scrape(ctx: click.Context, scraper: str | None) -> None:
+    """Run job scrapers to collect new postings."""
+    config = _load_config(ctx)
+    secrets = SecretsConfig()
+
+    from jobhunter.db.session import create_engine, get_session
+    from jobhunter.scrapers.orchestrator import ScraperOrchestrator, ScraperRunResult
+
+    create_engine(config.database)
+
+    def _print_scraper_result(result: ScraperRunResult) -> None:
+        status_icon = "+" if result.status == "success" else "x"
+        click.echo(
+            f"  {status_icon} {result.scraper_name}: {result.status} "
+            f"({result.jobs_found} found, {result.jobs_new} new, "
+            f"{result.duration_seconds:.1f}s)"
+        )
+        if result.error_message:
+            click.echo(f"    Error: {result.error_message}")
+
+    async def _run() -> None:
+        with get_session() as session:
+            orchestrator = ScraperOrchestrator(config, secrets, session)
+            if scraper:
+                result = await orchestrator.run_single(scraper)
+                _print_scraper_result(result)
+            else:
+                orch_result = await orchestrator.run_all()
+                for r in orch_result.results:
+                    _print_scraper_result(r)
+                click.echo(f"\nTotal: {orch_result.total_jobs_found} found, {orch_result.total_jobs_new} new")
+
+    asyncio.run(_run())
 
 
 @cli.command(name="filter")

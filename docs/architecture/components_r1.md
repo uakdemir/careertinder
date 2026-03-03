@@ -168,17 +168,18 @@ Scrapers --(DS1)--> Tier1 Filter --(DS3)--> Tier2 AI --(DS4)--> Tier3 AI --(DS4)
 
 | Attribute            | Detail |
 | -------------------- | ------ |
-| **Purpose**          | Single source of truth for all runtime parameters. Loads `config.yaml` and environment variables, validates them, and exposes a typed configuration object to every other component. Prevents scattered magic numbers and duplicate key management. |
-| **Inputs**           | `config.yaml` (file), `.env` (file, for secrets), environment variables, CLI overrides (optional). |
-| **Outputs**          | Frozen `AppConfig` dataclass instance distributed via dependency injection or singleton access. |
+| **Purpose**          | Single source of truth for all runtime parameters. Loads infrastructure settings from `config.yaml`, operational settings from the SQLite `settings` table, and secrets from environment variables. Validates all via Pydantic and exposes typed configuration objects to every other component. See ADR-009 (amended). |
+| **Inputs**           | `config.yaml` (infrastructure: `ai_models`, `database`, `dashboard`), SQLite `settings` table (operational: `scraping`, `filtering`, `scheduling`, `notifications`), `.env` (secrets), CLI overrides (optional). |
+| **Outputs**          | Frozen `AppConfig` for infrastructure settings; category-specific Pydantic models (e.g., `ScrapingConfig`) read from DB on demand. |
 | **Dependencies**     | `pyyaml`, `python-dotenv`, `pydantic` (for validation). No dependency on other JobHunter components. |
 | **Error Handling**   | Fail-fast on startup. If `config.yaml` is missing or malformed, or if required API keys are absent, raise `ConfigurationError` with a human-readable message and halt the pipeline before any work begins. Log the exact missing/invalid fields. |
 | **Implementation Notes** | |
 
-- The configuration file is structured into named sections: `scraping`, `filtering`, `ai_models`, `database`, `dashboard`, `scheduling`, `notifications`.
-- API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `APIFY_API_TOKEN`) are **never** stored in `config.yaml`. They live in `.env` or system environment variables and are merged at load time.
-- Filter thresholds (salary floor, score cutoffs, keyword lists) are hot-reloadable: the dashboard can trigger a config refresh without restarting the scheduler.
-- Schema example:
+- **Infrastructure settings** (`config.yaml`): `ai_models`, `database`, `dashboard`. Read at startup. Rarely change.
+- **Operational settings** (SQLite `settings` table): `scraping`, `filtering`, `scheduling`, `notifications`. Read on demand via CRUD helpers. Editable from the dashboard UI. Stored as JSON per category, validated by Pydantic.
+- API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `APIFY_API_TOKEN`) are **never** stored in `config.yaml` or the database. They live in `.env` or system environment variables and are merged at load time.
+- Operational settings are hot-reloadable: the dashboard writes to the `settings` table, and pipeline components read from it at the start of each run.
+- Schema example (`config.yaml` — infrastructure only after M1.5):
 
 ```yaml
 # config.yaml (abbreviated)
@@ -845,7 +846,7 @@ Audit log for every scraper execution. One record per scraper per orchestrated r
 | `started_at`     | `datetime`      | NOT NULL                           | When the scraper started. |
 | `completed_at`   | `datetime \| None` | NULLABLE                        | When the scraper finished. `None` if still running or crashed without cleanup. |
 | `duration_seconds` | `float \| None` | NULLABLE                         | Wall-clock duration. Computed as `completed_at - started_at`. |
-| `status`         | `str`           | NOT NULL, DEFAULT `"running"`, enum: `running`, `success`, `partial_success`, `failed`, `timeout`, `blocked` | Outcome of the run. |
+| `status`         | `str`           | NOT NULL, DEFAULT `"running"`, enum: `running`, `success`, `partial_success`, `failed`, `timeout`, `blocked`, `cancelled` | Outcome of the run. `cancelled` indicates user-initiated stop from the dashboard. |
 | `jobs_found`     | `int`           | NOT NULL, DEFAULT `0`              | Total number of job postings found during the scrape. |
 | `jobs_new`       | `int`           | NOT NULL, DEFAULT `0`              | Number of postings that were new (not previously seen). |
 | `jobs_updated`   | `int`           | NOT NULL, DEFAULT `0`              | Number of previously seen postings whose `last_seen` was updated. |
