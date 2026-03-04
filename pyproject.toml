@@ -32,10 +32,14 @@ ai = [
 dashboard = [
     "streamlit>=1.40,<2.0",
 ]
+postgresql = [
+    "psycopg2-binary>=2.9,<3.0",
+]
 all = [
     "playwright>=1.49,<2.0",
     "anthropic>=0.42,<1.0",
     "streamlit>=1.40,<2.0",
+    "psycopg2-binary>=2.9,<3.0",
 ]
 
 [project.scripts]

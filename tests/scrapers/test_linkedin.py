@@ -1,4 +1,4 @@
-"""Tests for LinkedIn HarvestAPI scraper (multi-profile, structured queries)."""
+"""Tests for LinkedIn valig scraper (multi-profile, structured queries)."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -9,7 +9,7 @@ from jobhunter.scrapers.linkedin_apify import LinkedInApifyScraper, _SingleProfi
 
 
 class TestSingleProfileScraper:
-    """Tests for the internal _SingleProfileScraper (HarvestAPI actor interface)."""
+    """Tests for the internal _SingleProfileScraper (valig actor interface)."""
 
     @pytest.fixture
     def profile(self, linkedin_search_profile):
@@ -23,40 +23,59 @@ class TestSingleProfileScraper:
         assert scraper.scraper_name == "linkedin"
 
     def test_build_actor_input(self, scraper) -> None:
+        """Test mapping from our config format to valig actor input."""
         actor_input = scraper._build_actor_input()
-        assert actor_input["jobTitles"] == ["Software Architect"]
-        assert actor_input["maxItems"] == 50
-        assert actor_input["sortBy"] == "date"
-        assert actor_input["locations"] == ["Remote"]
-        assert actor_input["workplaceType"] == ["remote"]
-        assert actor_input["experienceLevel"] == ["mid-senior", "director"]
-        # No salary/postedLimit set in fixture
-        assert "salary" not in actor_input
-        assert "postedLimit" not in actor_input
+        # valig uses single title string (we join with OR)
+        assert actor_input["title"] == "Software Architect"
+        assert actor_input["limit"] == 50
+        # valig uses "location" as string
+        assert actor_input["location"] == "Remote"
+        # valig uses "remote" array with numeric codes (1=On-site, 2=Remote, 3=Hybrid)
+        assert actor_input["remote"] == ["2"]
+        # valig uses "experienceLevel" with numeric codes (4=Mid-Senior, 5=Director)
+        assert actor_input["experienceLevel"] == ["4", "5"]
+        # No salary/datePosted set in fixture
+        assert "salary" not in actor_input  # valig doesn't support salary filter
+        assert "datePosted" not in actor_input
 
-    def test_build_actor_input_with_salary_and_posted(self, linkedin_config, secrets_with_apify) -> None:
+    def test_build_actor_input_with_posted_limit(self, linkedin_config, secrets_with_apify) -> None:
+        """Test datePosted mapping."""
         profile = LinkedInSearchProfile(
             label="Test",
             job_titles=["Engineer"],
-            salary="120k+",
             posted_limit="week",
         )
         scraper = _SingleProfileScraper(linkedin_config, secrets_with_apify, profile, max_items=10)
         actor_input = scraper._build_actor_input()
-        assert actor_input["salary"] == ["120k+"]
-        assert actor_input["postedLimit"] == "week"
+        # salary is NOT in actor_input (valig doesn't support it)
+        assert "salary" not in actor_input
+        # posted_limit maps to datePosted (r604800 = past week in seconds)
+        assert actor_input["datePosted"] == "r604800"
+
+    def test_build_actor_input_multiple_titles(self, linkedin_config, secrets_with_apify) -> None:
+        """Multiple job titles joined with OR."""
+        profile = LinkedInSearchProfile(
+            label="Test",
+            job_titles=["Engineering Manager", "Director of Engineering"],
+        )
+        scraper = _SingleProfileScraper(linkedin_config, secrets_with_apify, profile, max_items=10)
+        actor_input = scraper._build_actor_input()
+        assert actor_input["title"] == "Engineering Manager OR Director of Engineering"
 
     def test_parse_item_complete(self, scraper) -> None:
+        """Test parsing valig output format."""
         item = {
             "id": "4227647589",
             "title": "VP of Engineering",
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/4227647589",
-            "descriptionText": "Lead engineering org.",
+            "url": "https://www.linkedin.com/jobs/view/4227647589",
+            "description": "Lead engineering org.",
             "descriptionHtml": "<p>Lead engineering org.</p>",
-            "company": {"name": "MegaTech", "employeeCount": 500},
-            "salary": {"text": "$180K-$250K", "min": 180000, "max": 250000, "currency": "USD"},
-            "location": {"linkedinText": "Remote - Worldwide"},
+            "companyName": "MegaTech",
+            "companyUrl": "https://www.linkedin.com/company/megatech",
+            "salary": "$180K-$250K",
+            "location": "Remote - Worldwide",
             "postedDate": "2025-01-15",
+            "postedTimeAgo": "2 days ago",
         }
         result = scraper._parse_item(item)
         assert result is not None
@@ -69,46 +88,36 @@ class TestSingleProfileScraper:
         assert result.source_url == "https://www.linkedin.com/jobs/view/4227647589"
         assert result.raw_html == "<p>Lead engineering org.</p>"
 
-    def test_parse_item_salary_from_min_max(self, scraper) -> None:
-        item = {
-            "title": "Architect",
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/123",
-            "descriptionText": "Build things.",
-            "company": {"name": "Co"},
-            "salary": {"min": 100000, "max": 150000, "currency": "EUR"},
-        }
-        result = scraper._parse_item(item)
-        assert result is not None
-        assert result.salary_raw == "EUR 100,000 - 150,000"
-
-    def test_parse_item_salary_min_only(self, scraper) -> None:
-        item = {
-            "title": "Architect",
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/123",
-            "descriptionText": "Build things.",
-            "company": {"name": "Co"},
-            "salary": {"min": 90000, "currency": "USD"},
-        }
-        result = scraper._parse_item(item)
-        assert result is not None
-        assert result.salary_raw == "USD 90,000+"
-
     def test_parse_item_null_salary(self, scraper) -> None:
+        """Null salary is preserved."""
         item = {
             "title": "Architect",
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/123",
-            "descriptionText": "Build things.",
-            "company": {"name": "Co"},
+            "url": "https://www.linkedin.com/jobs/view/123",
+            "description": "Build things.",
+            "companyName": "Co",
             "salary": None,
         }
         result = scraper._parse_item(item)
         assert result is not None
         assert result.salary_raw is None
 
+    def test_parse_item_posted_time_ago_fallback(self, scraper) -> None:
+        """Falls back to postedTimeAgo if postedDate is missing."""
+        item = {
+            "title": "Architect",
+            "url": "https://www.linkedin.com/jobs/view/123",
+            "description": "Build things.",
+            "companyName": "Co",
+            "postedTimeAgo": "3 days ago",
+        }
+        result = scraper._parse_item(item)
+        assert result is not None
+        assert result.posted_date_raw == "3 days ago"
+
     def test_parse_item_missing_title(self, scraper) -> None:
         item = {
-            "company": {"name": "SomeCo"},
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/123",
+            "companyName": "SomeCo",
+            "url": "https://www.linkedin.com/jobs/view/123",
         }
         result = scraper._parse_item(item)
         assert result is None
@@ -116,8 +125,8 @@ class TestSingleProfileScraper:
     def test_parse_item_missing_company(self, scraper) -> None:
         item = {
             "title": "Engineer",
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/123",
-            "company": None,
+            "url": "https://www.linkedin.com/jobs/view/123",
+            "companyName": None,
         }
         result = scraper._parse_item(item)
         assert result is None
@@ -125,8 +134,8 @@ class TestSingleProfileScraper:
     def test_parse_item_missing_url(self, scraper) -> None:
         item = {
             "title": "Architect",
-            "company": {"name": "Co"},
-            "descriptionText": "Build things.",
+            "companyName": "Co",
+            "description": "Build things.",
         }
         result = scraper._parse_item(item)
         assert result is None
@@ -134,25 +143,12 @@ class TestSingleProfileScraper:
     def test_parse_item_empty_url(self, scraper) -> None:
         item = {
             "title": "Architect",
-            "company": {"name": "Co"},
-            "linkedinUrl": "",
-            "descriptionText": "Build things.",
+            "companyName": "Co",
+            "url": "",
+            "description": "Build things.",
         }
         result = scraper._parse_item(item)
         assert result is None
-
-    def test_parse_item_location_string_fallback(self, scraper) -> None:
-        """Location as a plain string instead of structured object."""
-        item = {
-            "title": "Architect",
-            "linkedinUrl": "https://www.linkedin.com/jobs/view/123",
-            "descriptionText": "Build things.",
-            "company": {"name": "Co"},
-            "location": "New York, NY",
-        }
-        result = scraper._parse_item(item)
-        assert result is not None
-        assert result.location_raw == "New York, NY"
 
     def test_parse_items_from_fixture(self, scraper, linkedin_apify_items) -> None:
         results = [scraper._parse_item(item) for item in linkedin_apify_items]
@@ -231,7 +227,7 @@ class TestLinkedInApifyScraper:
     async def test_scrape_no_profiles(self, secrets_with_apify) -> None:
         config = LinkedInConfig(
             enabled=True,
-            apify_actor_id="harvestapi/linkedin-job-search",
+            apify_actor_id="valig/linkedin-jobs-scraper",
             max_results=50,
             search_profiles=[],
         )
@@ -241,7 +237,7 @@ class TestLinkedInApifyScraper:
 
     @pytest.mark.asyncio
     async def test_scrape_single_profile(self, scraper) -> None:
-        """Full flow: one profile → mocked actor → results."""
+        """Full flow: one profile -> mocked actor -> results."""
         from jobhunter.scrapers.base import RawJobData
 
         mock_results = [
@@ -279,7 +275,7 @@ class TestLinkedInApifyScraper:
         ]
         config = LinkedInConfig(
             enabled=True,
-            apify_actor_id="harvestapi/linkedin-job-search",
+            apify_actor_id="valig/linkedin-jobs-scraper",
             max_results=100,
             search_profiles=profiles,
         )
@@ -330,7 +326,7 @@ class TestLinkedInApifyScraper:
         ]
         config = LinkedInConfig(
             enabled=True,
-            apify_actor_id="harvestapi/linkedin-job-search",
+            apify_actor_id="valig/linkedin-jobs-scraper",
             max_results=100,
             search_profiles=profiles,
         )

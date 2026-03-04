@@ -27,7 +27,7 @@ class TestConfigNewFields:
         scraping = config.scraping
         assert scraping.timeout_seconds == 600
         assert scraping.linkedin.search_profiles == []
-        assert scraping.linkedin.apify_actor_id == "harvestapi/linkedin-job-search"
+        assert scraping.linkedin.apify_actor_id == "valig/linkedin-jobs-scraper"
         assert scraping.wellfound.search_keyword == "software engineer"
         assert scraping.wellfound.location_filter == "remote"
         assert scraping.wellfound.enabled is False  # Deferred

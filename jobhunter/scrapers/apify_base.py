@@ -25,6 +25,8 @@ class ApifyBaseScraper(BaseScraper):
     def __init__(self, config: BaseModel, secrets: SecretsConfig) -> None:
         super().__init__(config, secrets)
         self._actor_id: str = config.apify_actor_id  # type: ignore[attr-defined]
+        # Apify API requires ~ instead of / in actor ID for URL path
+        self._actor_id_url: str = self._actor_id.replace("/", "~")
         self._max_results: int = config.max_results  # type: ignore[attr-defined]
         self._client: httpx.AsyncClient | None = None
 
@@ -54,10 +56,16 @@ class ApifyBaseScraper(BaseScraper):
         """POST /v2/acts/{actorId}/runs. Returns run ID."""
         assert self._client is not None
         actor_input = self._build_actor_input()
+        self._logger.info("Actor input for %s: %s", self._actor_id, actor_input)
         resp = await self._client.post(
-            f"/v2/acts/{self._actor_id}/runs",
+            f"/v2/acts/{self._actor_id_url}/runs",
             json=actor_input,
         )
+        if resp.status_code >= 400:
+            self._logger.error(
+                "Apify error %d for actor %s. Response: %s. Input was: %s",
+                resp.status_code, self._actor_id, resp.text, actor_input
+            )
         resp.raise_for_status()
         data = resp.json()["data"]
         run_id: str = data["id"]

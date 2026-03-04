@@ -51,14 +51,13 @@ Store short, active plans in `tmp/ai_communications/implementation_plans/` as ch
 
 ## Project Status
 
-- Current milestone: M1.5 (Dashboard Companion) + Scraper Enhancement — all implemented, uncommitted on `master`
-- Completed: M0 (committed), M1 (all 8 deliverables, uncommitted), M1.5 (D1-D7, uncommitted), Scraper Enhancement (LinkedIn multi-profile + HarvestAPI)
-- Verification (2026-03-03): ruff check (0 errors), mypy (0 errors, 66 source files), pytest (171 passed)
-- Branch: `master` — M1 + M1.5 + scraper enhancement in working tree (unstaged), need commit
-- DB: up to date (alembic upgrade head done, settings table seeded)
-- LinkedIn: switched to HarvestAPI actor (harvestapi/linkedin-job-search) with multi-profile structured queries, weight-based budget allocation, cross-profile dedup, URL parser convenience tool
-- Wellfound: deferred (all Apify actors require manual cookie/CAPTCHA), set enabled=false
-- Next action: commit M1+M1.5+scraper changes, then M2 (Tier 1 filter engine)
+- Current milestone: Ready to start M2 (Tier 1 Rule-Based Filtering)
+- Completed: M0, M1, M1.5, Scraper Enhancement — all committed (94b487a)
+- Environment: WSL2 (switched from Windows), venv at `.venv`
+- Verification (2026-03-04): ruff check (0 errors), mypy (0 errors, 66 source files), pytest (171 passed)
+- Branch: `master` — clean working tree
+- Dashboard: working (`python -m streamlit run jobhunter/dashboard/app.py`)
+- Next action: M2 implementation (rule engine, salary parser, location detector, title matcher, keyword filters, audit trail, CLI, dashboard extension)
 
 ---
 

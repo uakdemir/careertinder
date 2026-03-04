@@ -59,7 +59,7 @@ def linkedin_search_profile() -> LinkedInSearchProfile:
 def linkedin_config(linkedin_search_profile: LinkedInSearchProfile) -> LinkedInConfig:
     return LinkedInConfig(
         enabled=True,
-        apify_actor_id="harvestapi/linkedin-job-search",
+        apify_actor_id="valig/linkedin-jobs-scraper",
         max_results=50,
         search_profiles=[linkedin_search_profile],
     )

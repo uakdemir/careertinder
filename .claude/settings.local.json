@@ -19,7 +19,8 @@
       "WebFetch(domain:apify.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:www.npmjs.com)"
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(source .venv/bin/activate)"
     ]
   }
 }

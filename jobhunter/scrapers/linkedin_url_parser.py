@@ -1,7 +1,9 @@
-"""Parse LinkedIn search URLs into structured HarvestAPI actor parameters.
+"""Parse LinkedIn search URLs into structured search profile parameters.
 
 Convenience tool: if parsing breaks due to LinkedIn URL format changes,
 users can enter structured fields manually in the dashboard.
+
+Compatible with valig/linkedin-jobs-scraper actor.
 """
 
 import logging
@@ -36,17 +38,39 @@ _TIME_POSTED_MAP: dict[str, str] = {
     "r2592000": "month",
 }
 
-# Salary filter → HarvestAPI salary enum (approximate mapping)
-_SALARY_MAP: dict[str, str] = {
-    "1": "40k+",
-    "2": "60k+",
-    "3": "80k+",
-    "4": "100k+",
-    "5": "120k+",
-    "6": "140k+",
-    "7": "160k+",
-    "8": "180k+",
-    "9": "200k+",
+# LinkedIn job function codes (f_F parameter)
+# These are passed directly to valig via urlParam
+_JOB_FUNCTION_NAMES: dict[str, str] = {
+    "it": "Information Technology",
+    "eng": "Engineering",
+    "prjm": "Project Management",
+    "sale": "Sales",
+    "mktg": "Marketing",
+    "fin": "Finance",
+    "hr": "Human Resources",
+    "ops": "Operations",
+    "cons": "Consulting",
+    "dsgn": "Design",
+    "prod": "Product Management",
+    "data": "Data Science",
+    "rsrch": "Research",
+    "qa": "Quality Assurance",
+    "supp": "Customer Support",
+    "admn": "Administrative",
+    "bd": "Business Development",
+    "legal": "Legal",
+}
+
+# Common LinkedIn geoIds for reference
+_GEO_ID_NAMES: dict[str, str] = {
+    "102105699": "Turkey",
+    "102095887": "California, US",
+    "103644278": "United States",
+    "101165590": "United Kingdom",
+    "101282230": "Germany",
+    "102299470": "India",
+    "106155005": "New York, US",
+    "100364837": "Remote (Worldwide)",
 }
 
 
@@ -55,6 +79,16 @@ def parse_linkedin_url(url: str, label: str = "") -> LinkedInSearchProfile | Non
 
     Returns None if the URL cannot be parsed (not a LinkedIn jobs URL).
     Missing fields get sensible defaults.
+
+    Supported URL parameters:
+      - keywords: Search terms → job_titles
+      - location: Location text → locations
+      - geoId: LinkedIn geographic ID → geo_id
+      - f_E: Experience levels (1-6) → experience_level
+      - f_WT: Workplace type (1-3) → workplace_type
+      - f_F: Job functions (it, eng, prjm, etc.) → job_functions
+      - f_TPR: Time posted (r86400, r604800, etc.) → posted_limit
+      - f_JT: Contract type → contract_type
     """
     try:
         parsed = urlparse(url)
@@ -72,6 +106,9 @@ def parse_linkedin_url(url: str, label: str = "") -> LinkedInSearchProfile | Non
         location = params.get("location", [""])[0]
         locations = [location] if location else []
 
+        # Extract geoId (LinkedIn's geographic identifier)
+        geo_id = params.get("geoId", [None])[0]
+
         # Extract workplace type (f_WT)
         wt_codes = params.get("f_WT", [""])[0].split(",")
         workplace_type = [_WORKPLACE_MAP[c] for c in wt_codes if c in _WORKPLACE_MAP]
@@ -82,23 +119,30 @@ def parse_linkedin_url(url: str, label: str = "") -> LinkedInSearchProfile | Non
         exp_codes = params.get("f_E", [""])[0].split(",")
         experience_level = [_EXPERIENCE_MAP[c] for c in exp_codes if c in _EXPERIENCE_MAP]
 
+        # Extract job functions (f_F) - passed to valig via urlParam
+        func_codes = params.get("f_F", [""])[0].split(",")
+        job_functions = [c for c in func_codes if c in _JOB_FUNCTION_NAMES]
+
         # Extract time posted (f_TPR)
         tpr = params.get("f_TPR", [None])[0]
-        posted_limit = _TIME_POSTED_MAP.get(tpr, None) if tpr else None
+        posted_limit = _TIME_POSTED_MAP.get(tpr) if tpr else None
 
-        # Extract salary filter (f_SB2) — LinkedIn uses numeric codes
-        sb2 = params.get("f_SB2", [None])[0]
-        salary = _SALARY_MAP.get(sb2, None) if sb2 else None
+        # Extract contract type (f_JT) - not commonly used but supported
+        jt_codes = params.get("f_JT", [""])[0].split(",")
+        contract_type_map = {"F": "Full-time", "P": "Part-time", "C": "Contract", "T": "Temporary", "I": "Internship"}
+        contract_type = [contract_type_map[c] for c in jt_codes if c in contract_type_map]
 
-        auto_label = label or _build_auto_label(job_titles, locations, workplace_type)
+        auto_label = label or _build_auto_label(job_titles, job_functions, locations, geo_id, workplace_type)
 
         return LinkedInSearchProfile(
             label=auto_label,
             job_titles=job_titles,
             locations=locations,
+            geo_id=geo_id,
             workplace_type=workplace_type,
             experience_level=experience_level,
-            salary=salary,
+            job_functions=job_functions,
+            contract_type=contract_type,
             posted_limit=posted_limit,
         )
     except Exception:
@@ -108,7 +152,6 @@ def parse_linkedin_url(url: str, label: str = "") -> LinkedInSearchProfile | Non
 
 def build_linkedin_url(profile: LinkedInSearchProfile) -> str:
     """Build a LinkedIn search URL from a structured profile (for display/reference)."""
-    parts = ["https://www.linkedin.com/jobs/search/?"]
     params: list[str] = []
 
     if profile.job_titles:
@@ -116,6 +159,9 @@ def build_linkedin_url(profile: LinkedInSearchProfile) -> str:
 
     if profile.locations:
         params.append(f"location={profile.locations[0]}")
+
+    if profile.geo_id:
+        params.append(f"geoId={profile.geo_id}")
 
     # Reverse-map workplace type
     wt_reverse = {v: k for k, v in _WORKPLACE_MAP.items()}
@@ -129,19 +175,54 @@ def build_linkedin_url(profile: LinkedInSearchProfile) -> str:
     if exp_codes:
         params.append(f"f_E={','.join(exp_codes)}")
 
+    # Job functions (direct codes)
+    if profile.job_functions:
+        params.append(f"f_F={','.join(profile.job_functions)}")
+
     # Reverse-map posted limit
     tpr_reverse = {v: k for k, v in _TIME_POSTED_MAP.items()}
     if profile.posted_limit and profile.posted_limit in tpr_reverse:
         params.append(f"f_TPR={tpr_reverse[profile.posted_limit]}")
 
     params.append("sortBy=DD")
-    return parts[0] + "&".join(params)
+    return "https://www.linkedin.com/jobs/search/?" + "&".join(params)
+
+
+def get_job_function_name(code: str) -> str:
+    """Get human-readable name for a job function code."""
+    return _JOB_FUNCTION_NAMES.get(code, code)
+
+
+def get_geo_name(geo_id: str) -> str:
+    """Get human-readable name for a geoId (if known)."""
+    return _GEO_ID_NAMES.get(geo_id, f"geoId:{geo_id}")
 
 
 def _build_auto_label(
-    job_titles: list[str], locations: list[str], workplace_type: list[str]
+    job_titles: list[str],
+    job_functions: list[str],
+    locations: list[str],
+    geo_id: str | None,
+    workplace_type: list[str],
 ) -> str:
     """Generate a human-readable label from search parameters."""
-    title_part = job_titles[0] if job_titles else "All Jobs"
-    loc_part = locations[0] if locations else ("Remote" if "remote" in workplace_type else "Any Location")
+    # Title part
+    if job_titles:
+        title_part = job_titles[0]
+    elif job_functions:
+        func_names = [get_job_function_name(f) for f in job_functions[:2]]
+        title_part = " / ".join(func_names)
+    else:
+        title_part = "All Jobs"
+
+    # Location part
+    if locations:
+        loc_part = locations[0]
+    elif geo_id:
+        loc_part = get_geo_name(geo_id)
+    elif "remote" in workplace_type:
+        loc_part = "Remote"
+    else:
+        loc_part = "Any Location"
+
     return f"{title_part} — {loc_part}"

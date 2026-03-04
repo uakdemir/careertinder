@@ -1,9 +1,11 @@
-"""C2d — LinkedIn job scraper via HarvestAPI Apify actor.
+"""C2d — LinkedIn job scraper via valig Apify actor.
 
 Supports multi-profile search: each LinkedInSearchProfile is run as a
 separate actor invocation with weight-based budget allocation.
 
-The actor returns full job details in one pass (~$1/1k jobs).
+The valig actor (valig/linkedin-jobs-scraper) returns full job details
+at ~$0.32/1k jobs (3x cheaper than HarvestAPI).
+
 Dedup is handled at two levels:
   1. In-scraper: track seen LinkedIn job IDs across profiles to avoid
      returning the same job from overlapping searches.
@@ -19,9 +21,41 @@ from jobhunter.scrapers.apify_base import ApifyBaseScraper
 from jobhunter.scrapers.base import BaseScraper, RawJobData
 from jobhunter.scrapers.exceptions import ScraperError
 
+# Mapping from our config values to valig actor values (numeric codes)
+_WORKPLACE_MAP: dict[str, str] = {
+    "office": "1",
+    "remote": "2",
+    "hybrid": "3",
+}
+
+_EXPERIENCE_MAP: dict[str, str] = {
+    "internship": "1",
+    "entry": "2",
+    "associate": "3",
+    "mid-senior": "4",
+    "director": "5",
+    "executive": "6",
+}
+
+_DATE_POSTED_MAP: dict[str, str] = {
+    "1h": "r86400",
+    "24h": "r86400",
+    "week": "r604800",
+    "month": "r2592000",
+}
+
+_CONTRACT_TYPE_MAP: dict[str, str] = {
+    "full-time": "F",
+    "part-time": "P",
+    "contract": "C",
+    "temporary": "T",
+    "internship": "I",
+    "other": "O",
+}
+
 
 class _SingleProfileScraper(ApifyBaseScraper):
-    """Internal: runs one HarvestAPI actor invocation for a single search profile."""
+    """Internal: runs one valig actor invocation for a single search profile."""
 
     def __init__(
         self,
@@ -39,69 +73,132 @@ class _SingleProfileScraper(ApifyBaseScraper):
         return "linkedin"
 
     def _build_actor_input(self) -> dict:
-        """Build input for harvestapi/linkedin-job-search actor."""
+        """Build input for valig/linkedin-jobs-scraper actor.
+
+        Valig input schema:
+          - title: string (single search term)
+          - location: string (single location)
+          - remote: array ["On-site", "Remote", "Hybrid"]
+          - experienceLevel: array ["Internship", "Entry level", "Associate", "Mid-Senior", "Director", "Executive"]
+          - contractType: array ["Full-time", "Part-time", "Contract", "Temporary", "Internship", "Other"]
+          - datePosted: enum "Any time" | "Past month" | "Past week" | "Past 24 hours"
+          - limit: int 1-1000
+          - urlParam: array of {key, value} for advanced LinkedIn filters
+        """
+        # Join multiple job titles with OR for broader search
+        title = " OR ".join(self._profile.job_titles) if self._profile.job_titles else ""
+
+        # Use first location or empty for worldwide
+        location = self._profile.locations[0] if self._profile.locations else ""
+
         actor_input: dict = {
-            "jobTitles": self._profile.job_titles,
-            "maxItems": self._max_items,
-            "sortBy": "date",
+            "title": title,
+            "location": location,
+            "limit": self._max_items,
         }
 
-        if self._profile.locations:
-            actor_input["locations"] = self._profile.locations
-
+        # Map workplace_type to valig's remote field
         if self._profile.workplace_type:
-            actor_input["workplaceType"] = self._profile.workplace_type
+            remote_values = [
+                _WORKPLACE_MAP[wt]
+                for wt in self._profile.workplace_type
+                if wt in _WORKPLACE_MAP
+            ]
+            if remote_values:
+                actor_input["remote"] = remote_values
 
+        # Map experience_level
         if self._profile.experience_level:
-            actor_input["experienceLevel"] = self._profile.experience_level
+            exp_values = [
+                _EXPERIENCE_MAP[exp]
+                for exp in self._profile.experience_level
+                if exp in _EXPERIENCE_MAP
+            ]
+            if exp_values:
+                actor_input["experienceLevel"] = exp_values
 
-        if self._profile.salary:
-            actor_input["salary"] = [self._profile.salary]
+        # Map contract_type to valig codes
+        if self._profile.contract_type:
+            contract_values = [
+                _CONTRACT_TYPE_MAP[ct.lower()]
+                for ct in self._profile.contract_type
+                if ct.lower() in _CONTRACT_TYPE_MAP
+            ]
+            if contract_values:
+                actor_input["contractType"] = contract_values
 
-        if self._profile.posted_limit:
-            actor_input["postedLimit"] = self._profile.posted_limit
+        # Map posted_limit to datePosted
+        if self._profile.posted_limit and self._profile.posted_limit in _DATE_POSTED_MAP:
+            actor_input["datePosted"] = _DATE_POSTED_MAP[self._profile.posted_limit]
+
+        # Build urlParam for advanced filters (job functions, geoId)
+        url_params = self._build_url_params()
+        if url_params:
+            actor_input["urlParam"] = url_params
 
         return actor_input
 
-    def _parse_item(self, item: dict) -> RawJobData | None:
-        """Parse a HarvestAPI result into RawJobData.
+    def _build_url_params(self) -> list[dict[str, str]]:
+        """Build urlParam array for advanced LinkedIn filters.
 
-        HarvestAPI output uses nested objects:
-          - company.name (not flat companyName)
-          - linkedinUrl (not url)
-          - descriptionText (not description)
-          - salary.text / salary.min / salary.max
-          - location.linkedinText
+        Used for filters not natively supported by valig:
+          - f_F: Job functions (it, eng, prjm, etc.)
+          - geoId: LinkedIn geographic targeting
+        """
+        params: list[dict[str, str]] = []
+
+        # Job functions (f_F)
+        if self._profile.job_functions:
+            params.append({
+                "key": "f_F",
+                "value": ",".join(self._profile.job_functions),
+            })
+
+        # Geographic targeting (geoId)
+        if self._profile.geo_id:
+            params.append({
+                "key": "geoId",
+                "value": self._profile.geo_id,
+            })
+
+        return params
+
+    def _parse_item(self, item: dict) -> RawJobData | None:
+        """Parse a valig result into RawJobData.
+
+        Valig output schema:
+          - id, url, title, location (strings)
+          - companyName, companyUrl (strings)
+          - recruiterName, recruiterUrl (strings)
+          - experienceLevel, contractType, workType, sector (strings)
+          - salary (string or null)
+          - applyType, applyUrl (strings)
+          - postedTimeAgo, postedDate, applicationsCount
+          - description, descriptionHtml (strings)
         """
         title = item.get("title")
-        company_obj = item.get("company") or {}
-        company = company_obj.get("name") if isinstance(company_obj, dict) else None
+        company = item.get("companyName")
         if not title or not company:
             self._logger.warning(
                 "Skipping item with missing title/company: %s", item.get("id")
             )
             return None
 
-        source_url = (item.get("linkedinUrl") or "").strip()
+        source_url = (item.get("url") or "").strip()
         if not source_url:
             self._logger.warning(
                 "Skipping LinkedIn item with missing URL: %s", item.get("id")
             )
             return None
 
-        # Extract salary — structured object with text, min, max, currency
-        salary_raw = self._extract_salary(item.get("salary"))
+        # Extract location (valig returns it as a direct string)
+        location_raw = item.get("location")
 
-        # Extract location — structured object with linkedinText
-        location_obj = item.get("location") or {}
-        location_raw = (
-            location_obj.get("linkedinText")
-            if isinstance(location_obj, dict)
-            else str(location_obj) if location_obj else None
-        )
+        # Extract salary (valig returns it as a direct string or null)
+        salary_raw = item.get("salary")
 
         # Prefer plain text description, fall back to HTML
-        description = item.get("descriptionText") or item.get("descriptionHtml") or ""
+        description = item.get("description") or item.get("descriptionHtml") or ""
 
         return RawJobData(
             source="linkedin",
@@ -112,30 +209,9 @@ class _SingleProfileScraper(ApifyBaseScraper):
             salary_raw=salary_raw,
             location_raw=location_raw,
             requirements=None,
-            posted_date_raw=item.get("postedDate"),
+            posted_date_raw=item.get("postedDate") or item.get("postedTimeAgo"),
             raw_html=item.get("descriptionHtml"),
         )
-
-    @staticmethod
-    def _extract_salary(salary_obj: object) -> str | None:
-        """Extract a salary string from the HarvestAPI salary object."""
-        if salary_obj is None:
-            return None
-        if isinstance(salary_obj, str):
-            return salary_obj
-        if isinstance(salary_obj, dict):
-            # Prefer the display text
-            if text := salary_obj.get("text"):
-                return str(text)
-            # Fall back to min-max range
-            sal_min = salary_obj.get("min")
-            sal_max = salary_obj.get("max")
-            currency = salary_obj.get("currency", "USD")
-            if sal_min and sal_max:
-                return f"{currency} {sal_min:,} - {sal_max:,}"
-            if sal_min:
-                return f"{currency} {sal_min:,}+"
-        return None
 
 
 class LinkedInApifyScraper(BaseScraper):

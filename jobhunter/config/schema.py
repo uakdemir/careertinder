@@ -36,17 +36,23 @@ class WellfoundConfig(BaseModel):
 
 
 class LinkedInSearchProfile(BaseModel):
-    """A structured LinkedIn search query for the HarvestAPI actor."""
+    """A structured LinkedIn search query for valig Apify actor.
+
+    Supports all major LinkedIn job search filters including job functions
+    and geographic targeting via LinkedIn's geoId system.
+    """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     label: str
-    job_titles: list[str]
-    locations: list[str] = []
+    job_titles: list[str] = Field(default_factory=list)  # Keywords for title search
+    locations: list[str] = Field(default_factory=list)  # Location strings (city, country)
+    geo_id: str | None = None  # LinkedIn geoId (e.g., "102105699" for Turkey)
     workplace_type: list[str] = Field(default_factory=lambda: ["remote"])
     experience_level: list[str] = Field(default_factory=lambda: ["mid-senior", "director"])
-    salary: str | None = None
-    posted_limit: str | None = None
+    job_functions: list[str] = Field(default_factory=list)  # LinkedIn codes: it, eng, prjm, etc.
+    contract_type: list[str] = Field(default_factory=list)  # Full-time, Part-time, Contract, etc.
+    posted_limit: str | None = None  # 24h, week, month
     weight: int = Field(default=1, ge=1, le=10)
 
 
@@ -54,7 +60,7 @@ class LinkedInConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     enabled: bool = True
-    apify_actor_id: str = "harvestapi/linkedin-job-search"
+    apify_actor_id: str = "valig/linkedin-jobs-scraper"  # 3x cheaper than HarvestAPI
     max_results: int = 100
     search_profiles: list[LinkedInSearchProfile] = Field(default_factory=list)
 
@@ -104,9 +110,25 @@ class AIModelsConfig(BaseModel):
 
 
 class DatabaseConfig(BaseModel):
+    """Database configuration supporting SQLite and PostgreSQL.
+
+    For SQLite: set driver="sqlite" and path="data/jobhunter.db"
+    For PostgreSQL: set driver="postgresql" and host/port/name/user
+                    (env vars DATABASE_HOST, DATABASE_PORT, DATABASE_NAME,
+                     DATABASE_USER, DATABASE_PASSWORD override these values)
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True)
 
+    driver: str = "sqlite"  # "sqlite" or "postgresql"
+    # SQLite settings
     path: str = "data/jobhunter.db"
+    # PostgreSQL settings
+    host: str = "localhost"
+    port: int = 5432
+    name: str = "jobhunter"
+    user: str = "jobhunter"
+    # Common settings
     echo_sql: bool = False
 
 
@@ -151,3 +173,9 @@ class SecretsConfig(BaseSettings):
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
     apify_api_token: str | None = None
+    # PostgreSQL connection (env vars override config.yaml values)
+    database_host: str | None = None
+    database_port: int | None = None
+    database_name: str | None = None
+    database_user: str | None = None
+    database_password: str | None = None
