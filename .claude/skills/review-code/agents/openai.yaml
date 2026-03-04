@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Code"
+  short_description: "Review recent commits against analysis and architecture"
+  default_prompt: "Use $review-code to review the last [COMMIT_COUNT] commits against [ANALYSIS_DOC] (e.g., tmp/ai/temp/hobby/resume_matcher/analysis/r1/m2.md) and write findings to ./tmp/review_code.md (reading ./tmp/response_code.md if present). This is a Python project — check for ruff/mypy compliance, pytest coverage, and adherence to CLAUDE.md guidelines."

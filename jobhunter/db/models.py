@@ -74,8 +74,12 @@ class ProcessedJob(Base):
     )
 
     job_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    company_id: Mapped[int] = mapped_column(Integer, ForeignKey("companies.company_id"), nullable=False)
-    raw_id: Mapped[int] = mapped_column(Integer, ForeignKey("raw_job_postings.raw_id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("companies.company_id"), nullable=False, index=True
+    )
+    raw_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("raw_job_postings.raw_id"), nullable=False, unique=True
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -99,8 +103,9 @@ class ProcessedJob(Base):
     status: Mapped[str] = mapped_column(
         String,
         CheckConstraint(
-            "status IN ('new', 'tier1_pass', 'tier1_fail', 'tier2_pass', 'tier2_fail', "
-            "'tier2_maybe', 'tier2_error', 'evaluated', 'shortlisted', 'rejected_by_user', 'applied')"
+            "status IN ('new', 'tier1_pass', 'tier1_fail', 'tier1_ambiguous', 'tier2_pass', "
+            "'tier2_fail', 'tier2_maybe', 'tier2_error', 'evaluated', 'shortlisted', "
+            "'rejected_by_user', 'applied')"
         ),
         nullable=False,
         default="new",
@@ -289,12 +294,26 @@ class ScraperRun(Base):
 
 # DS10 -- FilterResult
 class FilterResult(Base):
+    """Audit trail for Tier 1 filtering decisions.
+
+    One row per RawJobPosting (raw_id is unique). Re-filtering updates in place.
+    """
+
     __tablename__ = "filter_results"
 
     filter_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    job_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("processed_jobs.job_id"), nullable=True)
-    raw_id: Mapped[int] = mapped_column(Integer, ForeignKey("raw_job_postings.raw_id"), nullable=False)
+    job_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("processed_jobs.job_id"), nullable=True
+    )
+    raw_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("raw_job_postings.raw_id"), nullable=False, unique=True
+    )
     passed: Mapped[bool] = mapped_column(nullable=False)
+    decision: Mapped[str] = mapped_column(
+        String(20),
+        CheckConstraint("decision IN ('pass', 'fail', 'ambiguous')"),
+        nullable=False,
+    )
     rules_applied: Mapped[str] = mapped_column(Text, nullable=False)
     rules_passed: Mapped[str] = mapped_column(Text, nullable=False)
     rules_failed: Mapped[str] = mapped_column(Text, nullable=False)

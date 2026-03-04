@@ -4,7 +4,7 @@
 
 1. Read `.claude/hotspots.md` for entrypoints, boundaries, and key file locations.
 2. Check `tmp/ai_communications/implementation_plans/` for an active plan and continue from the next unchecked item.
-3. Keep `## Project Status` (below) up to date at the end of a session.
+3. Read `tmp/ai_communications/project_status.md` for current project state.
 
 ## Hotspots
 
@@ -45,19 +45,13 @@ Store short, active plans in `tmp/ai_communications/implementation_plans/` as ch
 ```
 
 ### At session end:
-1. Update CLAUDE.md Project Status
+1. Update `tmp/ai_communications/project_status.md` with current state
 2. Clear completed todos
 3. Ensure implementation_notes reflects all changes made
 
 ## Project Status
 
-- Current milestone: Ready to start M2 (Tier 1 Rule-Based Filtering)
-- Completed: M0, M1, M1.5, Scraper Enhancement — all committed (94b487a)
-- Environment: WSL2 (switched from Windows), venv at `.venv`
-- Verification (2026-03-04): ruff check (0 errors), mypy (0 errors, 66 source files), pytest (171 passed)
-- Branch: `master` — clean working tree
-- Dashboard: working (`python -m streamlit run jobhunter/dashboard/app.py`)
-- Next action: M2 implementation (rule engine, salary parser, location detector, title matcher, keyword filters, audit trail, CLI, dashboard extension)
+See `tmp/ai_communications/project_status.md` for current project state (updated each session, not committed to git).
 
 ---
 

@@ -76,20 +76,106 @@ class ScrapingConfig(BaseModel):
 
 
 class LocationKeywordsConfig(BaseModel):
+    """Nested model for location keyword lists."""
+
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    include: list[str] = ["remote", "worldwide", "anywhere", "turkey", "europe", "emea"]
-    exclude: list[str] = ["us only", "us-based only", "must be in us"]
+    include: list[str] = Field(
+        default_factory=lambda: [
+            "remote",
+            "remote-friendly",
+            "fully remote",
+            "worldwide",
+            "anywhere",
+            "global",
+            "turkey",
+            "europe",
+            "emea",
+        ]
+    )
+    exclude: list[str] = Field(
+        default_factory=lambda: [
+            "us only",
+            "usa only",
+            "united states only",
+            "us-based only",
+            "must be located in",
+            "no remote",
+            "on-site required",
+        ]
+    )
 
 
 class FilteringConfig(BaseModel):
+    """Pydantic model for Tier 1 filtering configuration.
+
+    Stored in settings table as JSON. Dashboard edits are validated against this schema.
+    Missing salary always results in AMBIGUOUS (not configurable per design philosophy).
+    """
+
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     salary_min_usd: int = Field(default=90000, gt=0)
-    location_keywords: LocationKeywordsConfig = LocationKeywordsConfig()
-    title_whitelist: list[str] = ["architect", "principal", "staff", "lead", "director", "vp", "head of", "manager"]
-    title_blacklist: list[str] = ["intern", "junior", "entry level"]
-    company_blacklist: list[str] = []
+    location_keywords: LocationKeywordsConfig = Field(default_factory=LocationKeywordsConfig)
+    title_whitelist: list[str] = Field(
+        default_factory=lambda: [
+            "architect",
+            "principal",
+            "staff",
+            "lead",
+            "senior",
+            "director",
+            "vp",
+            "head of",
+            "manager",
+            "engineering manager",
+            "tech lead",
+            "team lead",
+        ]
+    )
+    title_blacklist: list[str] = Field(
+        default_factory=lambda: [
+            "intern",
+            "internship",
+            "junior",
+            "entry level",
+            "entry-level",
+            "associate",
+            "co-op",
+            "graduate",
+            "trainee",
+            "part-time",
+        ]
+    )
+    company_whitelist: list[str] = Field(default_factory=list)
+    company_blacklist: list[str] = Field(default_factory=list)
+    required_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "python",
+            "golang",
+            "go",
+            "rust",
+            "distributed systems",
+            "microservices",
+            "cloud",
+            "aws",
+            "kubernetes",
+            "k8s",
+            "architecture",
+            "system design",
+        ]
+    )
+    excluded_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "clearance required",
+            "security clearance",
+            "on-site only",
+            "no remote",
+            "must relocate",
+            "relocation required",
+            "visa sponsorship not available",
+        ]
+    )
 
 
 class AIModelConfig(BaseModel):

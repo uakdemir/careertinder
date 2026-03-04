@@ -26,6 +26,7 @@ This document captures the key architectural decisions made for the **JobHunter*
 | ADR-014 | Token Cost Tracking | Accepted | 2026-03-02 |
 | ADR-015 | Resume Text Extraction Strategy | Accepted | 2026-03-02 |
 | ADR-016 | Logging Strategy | Accepted | 2026-03-02 |
+| ADR-017 | Depth-First Development Strategy | Accepted | 2026-03-04 |
 
 ---
 
@@ -436,3 +437,41 @@ Implement structured logging using Python's built-in **`logging`** module with t
 - **Positive:** Console output during interactive runs provides immediate feedback during development without requiring log file inspection.
 - **Negative:** JSON log format is less human-readable than plain text in log files. Logging configuration adds boilerplate to each component.
 - **Mitigation:** The console handler uses a human-friendly format (not JSON). A simple log viewer utility or dashboard page can render JSON logs in a readable table format.
+
+---
+
+## ADR-017: Depth-First Development Strategy
+
+**Status:** Accepted
+
+### Context
+
+With the LinkedIn scraper working (via valig Apify actor), a strategic decision arose: should we complete the full pipeline (M2→M7) with LinkedIn data first, or implement all remaining scrapers (Remote.io, RemoteRocketship, Wellfound) before proceeding?
+
+Two approaches were considered:
+
+**Option A — Depth-first:** Complete the full pipeline (filtering, AI evaluation, content generation, dashboard) using LinkedIn data, then add more scrapers incrementally.
+
+**Option B — Breadth-first:** Get all scrapers working first, then build the filtering and evaluation pipeline with data from all sources.
+
+### Decision
+
+Adopt the **depth-first development strategy**: complete M2→M7 using LinkedIn as the primary data source, then add additional scrapers as incremental enhancements.
+
+Rationale:
+
+1. **Faster time-to-value:** The tool becomes usable for actual job hunting sooner. LinkedIn alone provides sufficient data for the target profile (senior remote roles).
+
+2. **Architecture already supports plug-and-play scrapers:** All scrapers output `RawJobData`, and the filtering/evaluation pipeline is source-agnostic. Adding scrapers later requires no changes to downstream components.
+
+3. **Early schema validation:** Building the full pipeline with real data reveals schema issues, data quality problems, and edge cases before multiple scrapers are implemented. If `RawJobData` needs changes, it happens once.
+
+4. **Reduced risk:** Wellfound is already deferred (CAPTCHA issues). Remote.io and RemoteRocketship use Playwright (different tech stack). Depth-first avoids context-switching overhead and potential debugging rabbit holes.
+
+5. **Compounding value:** Every pipeline component completed (filtering rules, AI prompts, dashboard views) immediately benefits all future scrapers.
+
+### Consequences
+
+- **Positive:** Usable tool sooner. Pipeline validated end-to-end with real data. Schema changes happen before scraper proliferation. LinkedIn is likely the highest-quality source for the target profile anyway.
+- **Negative:** Scrapers for other sources are delayed. Edge cases unique to other sources won't surface until later.
+- **Mitigation:** The `RawJobData` abstraction is well-defined. Other scrapers can be added post-M7 as incremental work without architectural changes. Cross-source edge cases are expected to be minor given the normalization already built into the scraper output format.

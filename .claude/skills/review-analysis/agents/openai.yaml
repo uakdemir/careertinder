@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Analysis"
+  short_description: "Review milestone analysis docs against architecture context"
+  default_prompt: "Use $review-analysis to review [ANALYSIS_DOC] (e.g., tmp/ai/temp/hobby/resume_matcher/analysis/r1/m2.md) and write findings to ./tmp/review_analysis.md (reading ./tmp/response_analysis.md if present). Reference CLAUDE.md, docs/architecture/components_r1.md, docs/architecture/adrs.md, and prior milestone analysis docs."

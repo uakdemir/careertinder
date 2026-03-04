@@ -210,7 +210,10 @@ filtering:
     exclude: ["us only", "us-based only", "must be in us"]
   title_whitelist: ["architect", "principal", "staff", "lead", "director", "vp", "head of", "manager"]
   title_blacklist: ["intern", "junior", "entry level"]
+  company_whitelist: []
   company_blacklist: []
+  required_keywords: ["python", "golang", "distributed systems", "kubernetes"]
+  excluded_keywords: ["clearance required", "must relocate"]
 
 ai_models:
   tier2:
@@ -368,10 +371,10 @@ class BaseScraper(ABC):
 | **Error Handling**   | Filter rules are evaluated independently. If one rule throws (e.g., regex compilation error on a malformed pattern), that rule is logged as errored and the job is flagged for manual review rather than silently dropped. The filter never crashes the pipeline; it degrades to "let it through" on individual rule failures. |
 | **Implementation Notes** | |
 
-- **Salary gate**: Extracts numeric salary from `salary_raw` using regex patterns that handle formats like "$120K-$150K", "120,000-150,000 USD", "EUR 90.000", etc. Normalizes to USD using a static exchange-rate table (updated manually in config). Jobs with `salary_min >= 90000 USD` pass. Jobs with no salary data are **not rejected** -- they pass through to Tier 2 for AI assessment.
-- **Location filter**: Scans `location_raw` and `description` for inclusion keywords (`remote`, `worldwide`, `anywhere`, `turkey`, `europe`, `emea`) and exclusion keywords (`us only`, `us-based only`, `must be located in`). Inclusion match OR absence of exclusion match = pass.
-- **Title matching**: Checks `title` against `title_whitelist` (regex patterns). At least one whitelist pattern must match. If the title matches any `title_blacklist` pattern, the job is rejected regardless of other criteria.
-- **Company blacklist**: Rejects jobs from companies the user has explicitly blacklisted (e.g., previous employers, known bad actors).
+- **Salary gate**: Extracts numeric salary from `salary_raw` using regex patterns that handle formats like "$120K-$150K", "120,000-150,000 USD", "EUR 90.000", etc. Normalizes to USD using a static exchange-rate table (updated manually in config). Jobs with `salary_min >= 90000 USD` pass. Jobs with no salary data are marked **AMBIGUOUS** (not rejected) -- they pass through to Tier 2 for AI assessment.
+- **Location filter**: Scans `location_raw` and `description` for inclusion keywords (`remote`, `worldwide`, `anywhere`, `turkey`, `europe`, `emea`) and exclusion keywords (`us only`, `us-based only`, `must be located in`). Exclusion match = FAIL. Inclusion match = PASS. Neither = **AMBIGUOUS** (let Tier 2 assess).
+- **Title matching**: Checks `title` against `title_whitelist` (regex patterns) and `title_blacklist`. If the title matches any `title_blacklist` pattern, the job is rejected (FAIL). If at least one whitelist pattern matches, the job passes. If no whitelist pattern matches, the job is marked **AMBIGUOUS** (not rejected).
+- **Company whitelist/blacklist**: Jobs from whitelisted companies always pass immediately (skip other rules). Jobs from blacklisted companies are rejected. Other companies pass this rule.
 - **Normalization**: During filtering, raw data is normalized into `DS3 ProcessedJob` fields (salary parsed to `salary_min`/`salary_max`/`currency`, location parsed to `location_policy`/`remote_regions`, description cleaned of HTML artifacts).
 - **Fingerprint generation**: Computes `fingerprint_hash` and writes/updates `DS11 JobFingerprint`.
 
@@ -682,7 +685,7 @@ The canonical job record after normalization and Tier 1 filtering. This is the c
 | Field              | Type            | Constraints                        | Description |
 | ------------------ | --------------- | ---------------------------------- | ----------- |
 | `job_id`           | `int`           | PK, autoincrement                  | Internal job identifier. |
-| `company_id`       | `int`           | FK -> `DS2.company_id`, NOT NULL   | Reference to the normalized company record. |
+| `company_id`       | `int`           | FK -> `DS2.company_id`, NOT NULL, INDEX | Reference to the normalized company record. Required; jobs must link to a Company. |
 | `raw_id`           | `int`           | FK -> `DS1.raw_id`, NOT NULL       | Back-reference to the original raw posting. |
 | `title`            | `str`           | NOT NULL                           | Job title (may be lightly normalized, e.g., trimmed whitespace). |
 | `salary_min`       | `int \| None`   | NULLABLE                           | Parsed minimum salary in the target currency (USD). `None` if salary was unparseable or absent. |
@@ -697,7 +700,7 @@ The canonical job record after normalization and Tier 1 filtering. This is the c
 | `fingerprint_hash` | `str`           | NOT NULL, UNIQUE INDEX             | Deduplication fingerprint (same as DS1). |
 | `first_seen`       | `datetime`      | NOT NULL                           | When this job was first discovered. |
 | `last_seen`        | `datetime`      | NOT NULL                           | When this job was last seen in a scrape (updated on each re-scrape). |
-| `status`           | `str`           | NOT NULL, DEFAULT `"new"`, INDEX   | Pipeline status. Enum: `new`, `tier1_pass`, `tier1_fail`, `tier2_pass`, `tier2_fail`, `tier2_maybe`, `tier2_error`, `evaluated`, `shortlisted`, `rejected_by_user`, `applied`. |
+| `status`           | `str`           | NOT NULL, DEFAULT `"new"`, INDEX   | Pipeline status. Enum: `new`, `tier1_pass`, `tier1_fail`, `tier1_ambiguous`, `tier2_pass`, `tier2_fail`, `tier2_maybe`, `tier2_error`, `evaluated`, `shortlisted`, `rejected_by_user`, `applied`. |
 | `created_at`       | `datetime`      | NOT NULL, DEFAULT `utcnow()`       | Record creation timestamp. |
 | `updated_at`       | `datetime`      | NOT NULL, DEFAULT `utcnow()`       | Last modification timestamp. |
 
@@ -865,8 +868,9 @@ Audit trail for Tier 1 rule-based filtering. One record per raw job posting that
 | ---------------- | ------------- | ---------------------------------- | ----------- |
 | `filter_id`      | `int`         | PK, autoincrement                  | Internal filter result identifier. |
 | `job_id`         | `int \| None` | FK -> `DS3.job_id`, NULLABLE       | Reference to the ProcessedJob if created. `None` if the job was rejected before a ProcessedJob record was created. |
-| `raw_id`         | `int`         | FK -> `DS1.raw_id`, NOT NULL       | Reference to the raw posting that was filtered. |
-| `passed`         | `bool`        | NOT NULL                           | Whether the job passed all Tier 1 rules. |
+| `raw_id`         | `int`         | FK -> `DS1.raw_id`, NOT NULL, UNIQUE | Reference to the raw posting that was filtered. One FilterResult per RawJobPosting. |
+| `passed`         | `bool`        | NOT NULL                           | Whether the job passed Tier 1 rules (True for PASS or AMBIGUOUS, False for FAIL). |
+| `decision`       | `str`         | NOT NULL, enum: `pass`, `fail`, `ambiguous` | Tri-state filter outcome. AMBIGUOUS jobs pass to Tier 2. |
 | `rules_applied`  | `str`         | NOT NULL                           | JSON-encoded list of rule names that were evaluated (e.g., `["company_blacklist", "title_blacklist", "title_whitelist", "location_exclude", "location_include", "salary_gate"]`). |
 | `rules_passed`   | `str`         | NOT NULL                           | JSON-encoded list of rule names that the job passed. |
 | `rules_failed`   | `str`         | NOT NULL                           | JSON-encoded list of rule names that the job failed. Empty list `[]` if all passed. |
@@ -881,7 +885,7 @@ Deduplication tracking. Maps fingerprint hashes to canonical job records and tra
 
 | Field              | Type          | Constraints                  | Description |
 | ------------------ | ------------- | ---------------------------- | ----------- |
-| `fingerprint_hash` | `str`         | PK (natural key), UNIQUE     | SHA-256 fingerprint: `sha256(normalize(company) + "|" + normalize(title))`. Excludes source URL so cross-site duplicates are caught. |
+| `fingerprint_hash` | `str`         | PK (natural key)             | SHA-256 fingerprint: `sha256(normalize(company) + "|" + normalize(title))`. Natural primary key — no surrogate ID. Excludes source URL so cross-site duplicates are caught. |
 | `job_id`           | `int`         | FK -> `DS3.job_id`, NOT NULL | The canonical ProcessedJob this fingerprint maps to. |
 | `source_urls`      | `str`         | NOT NULL                     | JSON-encoded list of all source URLs where this job was found (e.g., `["https://remote.io/job/123", "https://linkedin.com/jobs/456"]`). Grows as the same job is found on multiple sites. |
 | `first_seen`       | `datetime`    | NOT NULL                     | When this fingerprint was first encountered. |

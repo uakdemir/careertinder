@@ -78,11 +78,34 @@ def scrape(ctx: click.Context, scraper: str | None) -> None:
 
 
 @cli.command(name="filter")
+@click.option("--force", is_flag=True, help="Re-filter already-filtered jobs")
+@click.option("--dry-run", is_flag=True, help="Show what would be filtered without writing")
 @click.pass_context
-def filter_cmd(ctx: click.Context) -> None:
-    """Apply Tier 1 rule-based filters."""
-    _load_config(ctx)
-    click.echo("Filtering not yet implemented (M2)")
+def filter_cmd(ctx: click.Context, force: bool, dry_run: bool) -> None:
+    """Apply Tier 1 rule-based filtering to raw job postings."""
+    config = _load_config(ctx)
+
+    from jobhunter.db.session import create_engine, get_session
+    from jobhunter.db.settings import get_filtering_config
+    from jobhunter.filters.service import filter_unprocessed_jobs
+
+    create_engine(config.database)
+
+    with get_session() as session:
+        filtering_config = get_filtering_config(session)
+
+        if dry_run:
+            click.echo("DRY RUN: No changes will be written to database")
+
+        total, passed, failed, ambiguous = filter_unprocessed_jobs(
+            session, filtering_config, force=force, dry_run=dry_run
+        )
+
+        click.echo("\nFiltering complete:")
+        click.echo(f"  Total processed: {total}")
+        click.echo(f"  Passed (tier1_pass): {passed}")
+        click.echo(f"  Failed (tier1_fail): {failed}")
+        click.echo(f"  Ambiguous (tier1_ambiguous): {ambiguous}")
 
 
 @cli.command()
@@ -133,9 +156,8 @@ def ingest_resumes(ctx: click.Context) -> None:
 @cli.command(name="init-db")
 def init_db() -> None:
     """Create/upgrade the database to the latest schema."""
-    from alembic.config import Config
-
     from alembic import command
+    from alembic.config import Config
 
     configure_logging(verbose=False)
     alembic_cfg = Config("alembic.ini")
