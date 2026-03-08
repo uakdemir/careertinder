@@ -178,6 +178,15 @@ class FilteringConfig(BaseModel):
     )
 
 
+class AICostConfig(BaseModel):
+    """AI cost cap settings — stored in DB settings table (category 'ai_cost')."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    daily_cap_usd: float = Field(default=2.00, ge=0.0)
+    warn_at_percent: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
 class AIModelConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 

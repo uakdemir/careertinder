@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Float,
     ForeignKey,
@@ -170,6 +171,7 @@ class MatchEvaluation(Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False)
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     evaluated_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
     job: Mapped["ProcessedJob"] = relationship(back_populates="evaluations")

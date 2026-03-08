@@ -109,11 +109,60 @@ def filter_cmd(ctx: click.Context, force: bool, dry_run: bool) -> None:
 
 
 @cli.command()
+@click.option("--tier2-only", is_flag=True, help="Run Tier 2 only (skip Tier 3)")
+@click.option("--dry-run", is_flag=True, help="Show what would be evaluated without API calls")
+@click.option("--force", is_flag=True, help="Re-evaluate already-evaluated jobs")
 @click.pass_context
-def evaluate(ctx: click.Context) -> None:
+def evaluate(ctx: click.Context, tier2_only: bool, dry_run: bool, force: bool) -> None:
     """Run AI evaluation (Tier 2 + Tier 3)."""
-    _load_config(ctx)
-    click.echo("Evaluation not yet implemented (M3)")
+    config = _load_config(ctx)
+    secrets = SecretsConfig()
+
+    # Validate providers — only Anthropic is implemented in M3
+    for tier_name in ("tier2", "tier3"):
+        provider = getattr(config.ai_models, tier_name).provider
+        if provider != "anthropic":
+            raise click.ClickException(
+                f"Unsupported AI provider for {tier_name}: '{provider}'. "
+                "Only 'anthropic' is implemented in M3."
+            )
+
+    if not secrets.anthropic_api_key:
+        raise click.ClickException("ANTHROPIC_API_KEY not set in .env")
+
+    from jobhunter.ai.claude_client import ClaudeClient
+    from jobhunter.ai.evaluator import EvaluationService
+    from jobhunter.db.session import create_engine, get_session
+    from jobhunter.db.settings import get_ai_cost_config
+
+    create_engine(config.database)
+
+    with get_session() as session:
+        client = ClaudeClient(api_key=secrets.anthropic_api_key)
+        cost_config = get_ai_cost_config(session)
+        service = EvaluationService(session, client, config.ai_models, cost_config)
+
+        result = asyncio.run(service.run(
+            tier2_only=tier2_only,
+            force=force,
+            dry_run=dry_run,
+        ))
+
+        click.echo("\nEvaluation complete:")
+        click.echo(
+            f"  Tier 2: {result.tier2_evaluated} evaluated "
+            f"({result.tier2_passed} pass, {result.tier2_failed} fail, "
+            f"{result.tier2_maybe} maybe, {result.tier2_errors} errors)"
+        )
+        if not tier2_only:
+            click.echo(
+                f"  Tier 3: {result.tier3_evaluated} evaluated "
+                f"({result.tier3_strong} strong, {result.tier3_moderate} moderate, "
+                f"{result.tier3_weak} weak, {result.tier3_errors} errors)"
+            )
+        click.echo(f"  Total cost: ${result.total_cost_usd:.4f}")
+        if result.cap_reached:
+            click.echo("  Daily cost cap reached — remaining jobs deferred")
 
 
 @cli.command()

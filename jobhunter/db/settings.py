@@ -12,6 +12,7 @@ from sqlalchemy import String, Text, func
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from jobhunter.config.schema import (
+    AICostConfig,
     FilteringConfig,
     NotificationsConfig,
     SchedulingConfig,
@@ -26,13 +27,17 @@ CATEGORY_SCRAPING = "scraping"
 CATEGORY_FILTERING = "filtering"
 CATEGORY_SCHEDULING = "scheduling"
 CATEGORY_NOTIFICATIONS = "notifications"
+CATEGORY_AI_COST = "ai_cost"
 
 # Map of category names to their Pydantic model classes
-_CATEGORY_MODELS: dict[str, type[ScrapingConfig | FilteringConfig | SchedulingConfig | NotificationsConfig]] = {
+_CATEGORY_MODELS: dict[
+    str, type[ScrapingConfig | FilteringConfig | SchedulingConfig | NotificationsConfig | AICostConfig]
+] = {
     CATEGORY_SCRAPING: ScrapingConfig,
     CATEGORY_FILTERING: FilteringConfig,
     CATEGORY_SCHEDULING: SchedulingConfig,
     CATEGORY_NOTIFICATIONS: NotificationsConfig,
+    CATEGORY_AI_COST: AICostConfig,
 }
 
 
@@ -94,6 +99,12 @@ def get_filtering_config(session: Session) -> FilteringConfig:
     """Convenience wrapper that returns the typed FilteringConfig."""
     data = get_settings(session, CATEGORY_FILTERING)
     return FilteringConfig(**data)
+
+
+def get_ai_cost_config(session: Session) -> AICostConfig:
+    """Convenience wrapper that returns the typed AICostConfig."""
+    data = get_settings(session, CATEGORY_AI_COST)
+    return AICostConfig(**data)
 
 
 def seed_defaults(session: Session) -> None:
