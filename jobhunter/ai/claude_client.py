@@ -29,7 +29,7 @@ class AIResponse:
 class AIClient(Protocol):
     """Provider-neutral interface for AI API calls.
 
-    Concrete implementations: ClaudeClient (M3), OpenAIClient (Post-MVP).
+    Concrete implementations: ClaudeClient (M3), OpenAIClient (M4).
     """
 
     async def complete(

@@ -105,8 +105,7 @@ class ProcessedJob(Base):
         String,
         CheckConstraint(
             "status IN ('new', 'tier1_pass', 'tier1_fail', 'tier1_ambiguous', 'tier2_pass', "
-            "'tier2_fail', 'tier2_maybe', 'tier2_error', 'evaluated', 'shortlisted', "
-            "'rejected_by_user', 'applied')"
+            "'tier2_fail', 'tier2_maybe', 'tier2_error', 'evaluated')"
         ),
         nullable=False,
         default="new",
@@ -192,6 +191,7 @@ class CoverLetter(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
     model_used: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_template_id: Mapped[str | None] = mapped_column(String, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -212,6 +212,7 @@ class WhyCompany(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
     model_used: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_template_id: Mapped[str | None] = mapped_column(String, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False)

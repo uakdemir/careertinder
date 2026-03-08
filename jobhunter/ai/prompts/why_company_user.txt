@@ -1,0 +1,16 @@
+Generate a "Why do I want to work at this company?" answer.
+
+ROLE: {job_title} at {company_name}
+
+COMPANY CONTEXT:
+{company_context}
+
+JOB DESCRIPTION:
+{job_description}
+
+AI EVALUATION INSIGHTS:
+- Overall Score: {overall_score}/100 ({fit_category})
+- Key Strengths for this role:
+{strengths}
+
+Write the answer now.
