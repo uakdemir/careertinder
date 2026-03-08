@@ -156,8 +156,9 @@ def ingest_resumes(ctx: click.Context) -> None:
 @cli.command(name="init-db")
 def init_db() -> None:
     """Create/upgrade the database to the latest schema."""
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     configure_logging(verbose=False)
     alembic_cfg = Config("alembic.ini")

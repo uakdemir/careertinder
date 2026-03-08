@@ -35,6 +35,12 @@
       "Bash(git checkout *)"
     ]
   },
+  "sandbox": {
+      "enabled": true,
+      "filesystem": {
+        "allowWrite": ["./"]
+      }
+  },
   "hooks": {
     "PermissionRequest": [
       {

@@ -2,7 +2,7 @@
 
 ## 1) Repo Overview
 - Python 3.12+ project: job search automation platform (JobHunter).
-- Backend stack: SQLAlchemy 2.0 + Alembic (SQLite), Pydantic (config/validation), asyncio.
+- Backend stack: SQLAlchemy 2.0 + Alembic (PostgreSQL), Pydantic (config/validation), asyncio.
 - Scraping stack: Playwright (Remote.io, RemoteRocketship), httpx (Apify REST API for LinkedIn + Wellfound).
 - AI stack: Anthropic SDK (primary), OpenAI SDK (fallback), 3-tier filtering pipeline.
 - Dashboard: Streamlit multi-page app.

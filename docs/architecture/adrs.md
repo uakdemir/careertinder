@@ -11,7 +11,7 @@ This document captures the key architectural decisions made for the **JobHunter*
 | ADR# | Title | Status | Date |
 |------|-------|--------|------|
 | ADR-001 | Python as Primary Language | Accepted | 2026-03-02 |
-| ADR-002 | SQLite as Database | Accepted | 2026-03-02 |
+| ADR-002 | SQLite as Database | Superseded (→ PostgreSQL) | 2026-03-02 |
 | ADR-003 | Playwright for Web Scraping | Accepted | 2026-03-02 |
 | ADR-004 | Apify for LinkedIn and Wellfound Scraping | Accepted | 2026-03-02 |
 | ADR-005 | 3-Tier Filtering Architecture | Accepted | 2026-03-02 |
@@ -59,13 +59,15 @@ Python provides the richest ecosystem for every pillar of this project:
 
 ## ADR-002: SQLite as Database
 
-**Status:** Accepted
+**Status:** Superseded — switched to PostgreSQL (2026-03-04)
+
+> **Superseded:** During M1.5 implementation, the database was migrated from SQLite to PostgreSQL running on the Windows host, accessed from WSL2. The SQLAlchemy abstraction layer (ADR-010) made this a connection-string-only change. PostgreSQL provides better concurrent access, richer query capabilities, and aligns with production-grade tooling.
 
 ### Context
 
 The platform needs persistent storage for job postings, evaluation results, generated materials, cost tracking, and run metadata. The system is a single-user local application running on one Windows machine.
 
-### Decision
+### Decision (original)
 
 Use **SQLite** as the sole database engine.
 

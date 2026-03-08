@@ -96,7 +96,7 @@ Target profile: senior tech professional, remote positions from Turkey, $90K+ sa
 ### Tech Stack (see ADRs in docs/architecture/adrs.md)
 
 - **Language:** Python 3.12+ (ADR-001)
-- **Database:** SQLite + SQLAlchemy 2.0 ORM + Alembic (ADR-002, ADR-010)
+- **Database:** PostgreSQL + SQLAlchemy 2.0 ORM + Alembic (ADR-002 superseded, ADR-010)
 - **Scraping:** Playwright for 2 sites (ADR-003), Apify REST API for LinkedIn + Wellfound (ADR-004)
 - **AI Primary:** Anthropic Claude SDK — Haiku for Tier 2, Sonnet for Tier 3 (ADR-005, ADR-006)
 - **AI Fallback:** OpenAI SDK — GPT-4o-mini for Tier 2, GPT-4o for Tier 3 (ADR-006)
@@ -129,7 +129,7 @@ jobhunter/                  # main package
   utils/                    # shared utilities (logging setup, cost tracking)
 tests/                      # pytest test suite
 alembic/                    # database migrations
-data/                       # SQLite DB file, resume PDFs, backups
+data/                       # resume PDFs, backups
 logs/                       # rotating log files
 config.yaml                 # runtime configuration
 run.py                      # CLI entry point
@@ -138,10 +138,10 @@ run.py                      # CLI entry point
 ### Development Environment
 
 - **Windows 11** (native, not WSL)
-- **VS Code** with Python + Pylance + SQLite Viewer extensions
+- **VS Code** with Python + Pylance extensions
 - **Claude Code CLI** as primary development tool
 - **Virtual environment** via `python -m venv .venv`
-- No Docker required (SQLite is file-based)
+- PostgreSQL running on Windows host, accessed from WSL2 via host IP
 
 ### Workflow Convention
 
