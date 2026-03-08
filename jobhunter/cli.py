@@ -166,11 +166,59 @@ def evaluate(ctx: click.Context, tier2_only: bool, dry_run: bool, force: bool) -
 
 
 @cli.command()
+@click.option("--dry-run", is_flag=True, help="Show what would be generated without API calls")
+@click.option("--force", is_flag=True, help="Regenerate even if content already exists")
 @click.pass_context
-def generate(ctx: click.Context) -> None:
-    """Generate cover letters and why-company answers."""
-    _load_config(ctx)
-    click.echo("Generation not yet implemented (M4)")
+def generate(ctx: click.Context, dry_run: bool, force: bool) -> None:
+    """Generate cover letters and why-company answers for shortlisted jobs."""
+    config = _load_config(ctx)
+    secrets = SecretsConfig()
+
+    # Content gen uses the content_gen model config — select provider
+    provider = config.ai_models.content_gen.provider
+    if provider == "anthropic":
+        if not secrets.anthropic_api_key:
+            raise click.ClickException("ANTHROPIC_API_KEY not set in .env")
+        from jobhunter.ai.claude_client import AIClient, ClaudeClient
+
+        client: AIClient = ClaudeClient(api_key=secrets.anthropic_api_key)
+    elif provider == "openai":
+        if not secrets.openai_api_key:
+            raise click.ClickException("OPENAI_API_KEY not set in .env")
+        from jobhunter.ai.openai_client import OpenAIClient
+
+        client = OpenAIClient(api_key=secrets.openai_api_key)
+    else:
+        raise click.ClickException(
+            f"Unsupported content_gen provider: '{provider}'. "
+            "Use 'anthropic' or 'openai'."
+        )
+
+    from jobhunter.db.session import create_engine, get_session
+    from jobhunter.db.settings import get_ai_cost_config
+    from jobhunter.generation.service import GenerationService
+
+    create_engine(config.database)
+
+    with get_session() as session:
+        cost_config = get_ai_cost_config(session)
+        service = GenerationService(session, client, config.ai_models, cost_config)
+
+        result = asyncio.run(service.run(force=force, dry_run=dry_run))
+
+        click.echo("\nGeneration complete:")
+        click.echo(
+            f"  Cover letters: {result.cover_letters_generated} generated, "
+            f"{result.cover_letters_skipped} skipped"
+        )
+        click.echo(
+            f"  Why-company answers: {result.why_company_generated} generated, "
+            f"{result.why_company_skipped} skipped"
+        )
+        click.echo(f"  Errors: {result.errors}")
+        click.echo(f"  Total cost: ${result.total_cost_usd:.4f}")
+        if result.cap_reached:
+            click.echo("  Daily cost cap reached — remaining jobs deferred")
 
 
 @cli.command()
