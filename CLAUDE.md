@@ -1,5 +1,9 @@
 # Claude Project Instructions
 
+## Response Timestamp
+
+Append a military timestamp (e.g. `20:23:06`) at the very end of every response. Use the current time. No date needed, just `HH:MM:SS`.
+
 ## Session Bootstrap (do this first)
 
 1. Read `.claude/hotspots.md` for entrypoints, boundaries, and key file locations.
@@ -143,7 +147,14 @@ run.py                      # CLI entry point
 - **Virtual environment** via `python -m venv .venv`
 - PostgreSQL running on Windows host, accessed from WSL2 via host IP
 
-### Workflow Convention
+### Git Policy (MANDATORY)
+
+- **NEVER commit to git.** Do not run `git commit`, `git push`, `git tag`, or any command that modifies git history.
+- When asked for a commit message, **only print the message text** — the user will review and commit manually.
+- Do not run `git add` unless explicitly asked.
+- This rule has NO exceptions. Even if the user says "commit this", clarify and print the message instead.
+
+## Workflow Convention
 
 - Analysis-first: for each milestone, clarify requirements → approve → implement
 - Claude Code handles implementation; user reviews in VS Code

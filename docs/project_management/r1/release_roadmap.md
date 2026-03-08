@@ -2,7 +2,7 @@
 
 > **Project:** Job Search Automation Platform (JobHunter)
 > **Version:** R1 (Initial Release)
-> **Last Updated:** 2026-03-03
+> **Last Updated:** 2026-03-08
 > **Target Platform:** Windows (local execution)
 
 ## Overview
@@ -16,7 +16,7 @@ JobHunter is a locally-run job search automation platform that scrapes postings 
 | Language             | Python 3.12+                            |
 | Browser Automation   | Playwright                              |
 | External Scraping    | Apify API (LinkedIn + Wellfound)        |
-| Database             | SQLite + SQLAlchemy ORM + Alembic       |
+| Database             | PostgreSQL + SQLAlchemy 2.0 ORM + Alembic |
 | AI - Primary         | Claude SDK (Anthropic)                  |
 | AI - Fallback        | OpenAI SDK                              |
 | Dashboard            | Streamlit                               |
@@ -30,41 +30,41 @@ JobHunter is a locally-run job search automation platform that scrapes postings 
 
 > **Development model:** Claude Opus generates all code; user provides async review, live testing, and credentials. Estimates below reflect this AI-assisted workflow, not solo human development.
 
-| Milestone | Name                          | Complexity | Est. Duration | Depends On | Cumulative |
-| --------- | ----------------------------- | ---------- | ------------- | ---------- | ---------- |
-| M0        | Foundation & Project Setup    | S          | 2-3 hours     | --         | Day 1      |
-| M1        | Scraper Infrastructure        | L          | 2-3 days      | M0         | Day 4      |
-| M1.5      | Dashboard Companion (Early UI)| M          | 4-6 hours     | M0, M1     | Day 5      |
-| M2        | Tier 1 Rule-Based Filtering   | S          | 2-4 hours     | M1         | Day 5      |
-| M3        | AI Evaluation Pipeline        | M          | 3-5 hours     | M2         | Day 6      |
-| M4        | Content Generation            | S          | 2-3 hours     | M3         | Day 6      |
-| M5        | Dashboard Review Workflow     | M          | 3-4 hours     | M4, M1.5   | Day 7      |
-| M6        | Automation & Scheduling       | S          | 1-2 hours     | M5         | Day 7      |
-| M7        | Integration Testing & Fixes   | M          | 1-2 days      | M6         | Day 8-9    |
+| Milestone | Name                                    | Complexity | Status       | Depends On |
+| --------- | --------------------------------------- | ---------- | ------------ | ---------- |
+| M0        | Foundation & Project Setup              | S          | **Done**     | --         |
+| M1        | Scraper Infrastructure                  | L          | **Done**     | M0         |
+| M1.5      | Dashboard Companion (Early UI)          | M          | **Done**     | M0, M1    |
+| M2        | Tier 1 Rule-Based Filtering             | S          | **Done**     | M1         |
+| M3        | AI Evaluation Pipeline                  | M          | **Done**     | M2         |
+| M3.5      | Dashboard Command Center                | M          | **Done**     | M3, M1.5   |
+| M4        | Content Generation + Review Workflow    | M          | Not started  | M3, M3.5   |
+| M5        | UX Improvements                         | M          | Not started  | M4         |
+| M6        | Automation & Scheduling                 | S          | Not started  | M4         |
+| M7        | Integration Testing & Polish            | M          | Not started  | M5, M6    |
 
-**Total estimated duration: 7-10 days (1-1.5 weeks)**
+### Progress notes
 
-### Why this is achievable
-
-- M0, M2, M3, M4, M6 are **deterministic code** — Claude Opus writes ORM models, rule engines, API wrappers, prompt templates, and Streamlit pages in single sessions with no ambiguity.
-- **M1.5 introduces the dashboard early** — the UI grows incrementally alongside the backend rather than being a monolithic M5 build. Each backend milestone extends the existing dashboard with new pages.
-- M5 (Dashboard Review Workflow) is now **reduced in scope** — it only adds the job review, approve/reject, and ready-to-apply views on top of the existing M1.5 dashboard shell.
-- **M1 (Scrapers) is the bottleneck** — the only milestone requiring iterative live testing against real websites. See `risky_components.md` for mitigation.
-- M7 absorbs scraper fixes, integration issues, and prompt tuning discovered during real use.
+- **M0–M3.5 are complete.** The full pipeline from scraping through AI evaluation is operational, with a Streamlit dashboard providing visibility and control at every stage.
+- **M3.5 was added mid-project** to restructure the dashboard into a command center with pipeline review, job detail, operations, and AI settings pages — eliminating the need for CLI usage.
+- **Old M4 (Content Generation) and old M5 (Dashboard Review Workflow) are merged** into the new M4, since most of the review workflow was already delivered by M3.5. The new M4 adds cover letter generation, "why this company?" generation, and the remaining "Ready to Apply" application workflow on the existing dashboard.
+- **New M5 (UX Improvements)** is a dedicated milestone for UX refinements discovered during real usage. Scope will be defined after M4 is complete.
+- **M6 (Automation & Scheduling)** and **M7 (Integration Testing & Polish)** remain largely unchanged.
 
 ### Parallel UI Philosophy
 
 **Every backend milestone gets a corresponding UI surface immediately.** The dashboard is not a deferred monolith — it grows incrementally:
 
-| Backend Milestone | UI Surface Added |
-|---|---|
-| M0 | Resume upload, DB status (via M1.5) |
-| M1 | Raw job browser, scraper runs, scraper config, trigger scrape (via M1.5) |
-| M2 | Filter results view, rule config editor (M2 extends dashboard) |
-| M3 | Evaluation results, cost tracker (M3 extends dashboard) |
-| M4 | Cover letter viewer, "why company" viewer (M4 extends dashboard) |
-| M5 | Job review workflow, approve/reject, ready-to-apply (extends dashboard) |
-| M6 | Pipeline status, scheduling config (extends dashboard) |
+| Backend Milestone | UI Surface Added | Status |
+|---|---|---|
+| M0 | Resume upload, DB status (via M1.5) | **Done** |
+| M1 | Raw job browser, scraper runs, scraper config, trigger scrape (via M1.5) | **Done** |
+| M2 | Filter results view, rule config editor (M2 extends dashboard) | **Done** |
+| M3 | Evaluation results, cost tracker (M3 extends dashboard) | **Done** |
+| M3.5 | Pipeline funnel home, pipeline review cards, job detail, operations panel, AI settings | **Done** |
+| M4 | Cover letter viewer, "why company" viewer, Ready to Apply workflow | Not started |
+| M5 | UX improvements (scope TBD after M4) | Not started |
+| M6 | Pipeline status, scheduling config (extends dashboard) | Not started |
 
 ### MVP Scope Cuts (deferred to post-MVP)
 
@@ -73,49 +73,54 @@ JobHunter is a locally-run job search automation platform that scrapes postings 
 | OpenAI fallback provider | M3 | Post-MVP (Claude-only is sufficient) |
 | Content versioning (multiple versions per job) | M4 | Post-MVP (single version is fine) |
 | Circuit breaker pattern | M1 | Post-MVP (simple try/except for MVP) |
-| Dashboard analytics/charts | M5 | Post-MVP |
+| Company research enrichment | M4 | Post-MVP |
 | Daily summary reports | M6 | Post-MVP |
 | Desktop notifications | M6 | Post-MVP |
 | Data export (CSV/Excel) | M7 | Post-MVP |
-| Company research enrichment | M4 | Post-MVP |
 
 ---
 
 ## Dependency Graph
 
 ```
-M0 (Foundation)
+M0 (Foundation)                                            [DONE]
  |
  +---> M1 (Scrapers) ---> M2 (Rule Filtering) ---> M3 (AI Evaluation)
- |         |                                             |
+ |         |                                             |    [DONE]
  |         v                                             v
- |     M1.5 (Early UI) --------+               M4 (Content Generation)
- |                              |                        |
- |                              v                        v
- |                          M5 (Review Workflow) <-------+
- |                              |
- |                              v
- |                          M6 (Automation)
- |                              |
- |                              v
- |                          M7 (Polish)
+ |     M1.5 (Early UI) ---> M3.5 (Dashboard CC) --> M4 (Content Gen + Review)
+ |         [DONE]              [DONE]                    |
+ |                                                       v
+ |                                               M5 (UX Improvements)
+ |                                                       |
+ |                                       +---------------+
+ |                                       |               |
+ |                                       v               v
+ |                                   M6 (Automation)   (parallel)
+ |                                       |               |
+ |                                       +-------+-------+
+ |                                               |
+ |                                               v
+ |                                           M7 (Polish)
 ```
 
-The backend pipeline (M1→M2→M3→M4) is linear. M1.5 branches off after M1 to provide early UI, then M5 merges both tracks (M4 backend + M1.5 dashboard shell). The primary constraint is **user availability for live testing** (scrapers, credentials, API keys).
+The backend pipeline (M1→M2→M3) is complete. M3.5 restructured the dashboard into a command center. M4 merges the old M4 (content generation) and old M5 (review workflow) since M3.5 already delivered most review UI. M5 is a dedicated UX improvements pass. M6 (automation) can proceed in parallel with M5.
 
 ---
 
 ## Critical Path Analysis
 
-With AI-assisted development, the bottleneck shifts from "writing code" to "testing against live systems." The single critical path risk is:
+With AI-assisted development, the bottleneck shifts from "writing code" to "testing against live systems."
 
-1. **M1 (Scraper Infrastructure)** -- The ONLY milestone requiring iterative live testing. For the 2 Playwright scrapers (Remote.io, RemoteRocketship), site HTML structures must be inspected in real-time and selectors verified. The 2 Apify scrapers (LinkedIn, Wellfound) are REST API integrations with deterministic JSON output. Claude generates all scraper code, but the user must run Playwright scrapers and report results. **Mitigation:** Start with Apify scrapers first (LinkedIn + Wellfound in ~1 hour), then iterate on Playwright scrapers.
+1. **M1 (Scraper Infrastructure)** -- **Resolved.** LinkedIn scraper is operational via Apify. Other scrapers (Remote.io, RemoteRocketship, Wellfound) are deferred; LinkedIn is sufficient for MVP.
 
-2. **M3 (AI Evaluation Pipeline)** -- Low risk. Prompt engineering is fast when Claude writes the prompts and the user reviews AI output quality on a handful of real jobs. Structured JSON output with response validation catches format issues immediately.
+2. **M3 (AI Evaluation Pipeline)** -- **Resolved.** Tier 2 + Tier 3 evaluation pipeline is operational with Claude Haiku/Sonnet, cost caps, and structured output parsing.
 
-3. **M5 (Dashboard)** -- Low risk for MVP. A minimal Streamlit table with filters is a few hours of work. The risk is scope creep — resist adding charts, analytics, and fancy layouts until the pipeline is proven.
+3. **M4 (Content Generation + Review Workflow)** -- The current critical path item. Cover letter and "why this company?" generation plus the "Ready to Apply" application workflow. Low risk since the AI client infrastructure and dashboard patterns are established.
 
-**Buffer:** M7 (1-2 days) exists specifically to absorb scraper failures, prompt tuning, and integration issues found during first real pipeline runs.
+4. **M6 (Automation)** -- Low risk. Pipeline orchestration and Windows Task Scheduler integration. Can proceed in parallel with M5.
+
+**Buffer:** M7 exists to absorb prompt tuning, integration issues, and fixes discovered during real pipeline runs.
 
 ---
 
@@ -179,7 +184,7 @@ None.
   - [ ] Dashboard settings (port, page size)
   - [ ] Scheduling settings (cron expression, retry policy)
 - [ ] Config loader module with validation and defaults
-- [ ] Set up SQLite database with SQLAlchemy engine and session management
+- [ ] Set up PostgreSQL database with SQLAlchemy 2.0 engine and session management
 - [ ] Implement all ORM models (DS1-DS11):
   - [ ] DS1: `RawJobPosting` (raw scraped data before processing)
   - [ ] DS2: `Company` (company metadata)
@@ -212,7 +217,7 @@ None.
 #### Acceptance Criteria
 
 1. `python run.py --help` prints usage information and exits cleanly.
-2. Running the project creates the SQLite database with all tables matching the ORM models.
+2. Running the project creates the PostgreSQL database with all tables matching the ORM models.
 3. A PDF resume placed in the designated folder is extracted to text and stored in the database.
 4. `alembic upgrade head` and `alembic downgrade -1` both succeed.
 5. `pytest` runs and all tests pass with zero external dependencies.
@@ -326,7 +331,7 @@ M0 (database, ORM models, config), M1 (scrapers, raw_job_postings, scraper_runs 
   - [ ] Streamlit multi-page app structure under `jobhunter/dashboard/`
   - [ ] DB-backed settings model (`DS12 SettingsEntry`) with JSON fields for scraping, filtering, scheduling, notifications
   - [ ] Alembic migration: create `settings` table, seed defaults from Pydantic models
-  - [ ] Hybrid config loading: `config.yaml` for ai_models/database/dashboard, SQLite for operational settings
+  - [ ] Hybrid config loading: `config.yaml` for ai_models/database/dashboard, DB for operational settings
 - [ ] **Resume management page (D2)**:
   - [ ] Upload PDF resumes, extract text via existing M0 pipeline, persist to DS8
   - [ ] List stored resumes with metadata (filename, upload date, word count)
@@ -364,7 +369,7 @@ M0 (database, ORM models, config), M1 (scrapers, raw_job_postings, scraper_runs 
 
 1. `streamlit run jobhunter/dashboard/app.py` launches without errors and shows sidebar navigation.
 2. A PDF resume can be uploaded, its text viewed, and the resume deleted — all from the UI.
-3. Scraper config edits made in the UI are persisted to the SQLite `settings` table and validated.
+3. Scraper config edits made in the UI are persisted to the `settings` table and validated.
 4. Raw jobs browser shows all scraped jobs with working source filter and search.
 5. Scraper runs page shows run history with correct status and error details.
 6. Triggering a scrape from the UI starts a background job; status is polled; duplicate runs are prevented.
@@ -537,17 +542,48 @@ M2 (filtered jobs with tier 1 results, stored resumes).
 
 ---
 
-### M4 -- Content Generation
+### M3.5 -- Dashboard Command Center ✅
 
-**Complexity: S (Small)**
+**Complexity: M (Medium)** | **Status: COMPLETE**
 
 #### Description
 
-Generate personalized application materials for jobs that pass AI evaluation. This includes cover letters tailored to specific job requirements, "Why this company?" answers enriched with company research, and a versioning system that supports regeneration with different prompts or models. The output is the raw material the user needs to apply.
+Restructure the M1.5 dashboard into a command center with `st.navigation()` grouped sections, pipeline funnel home page, card-based pipeline review with inline triage actions, full job detail view, operations panel (scrape/filter/evaluate from UI), and AI settings page. Introduces DS7 `ApplicationStatus` as an append-only user-action tracking table separate from `ProcessedJob.status` pipeline stages.
 
 #### Dependencies
 
-M3 (evaluated and scored jobs, resume recommendation, AI client wrappers).
+M3 (AI evaluation pipeline, MatchEvaluation records), M1.5 (existing dashboard shell).
+
+#### What was delivered
+
+- **D7: Navigation Restructure** — `st.navigation()` API with Pipeline/Configure/History groups
+- **D6: Status Transition Actions** — Alembic migration `d4e5f6a7b8c9`, `status_actions.py` component
+- **D1: Funnel Home Page** — 5-stage pipeline funnel, attention items, quick actions, recent activity
+- **D5: AI Settings Page** — cost overview, config editor, model info, 7-day cost history chart
+- **D2: Pipeline Review** — card-based worklist with score display, inline Shortlist/Skip, filter controls, pagination
+- **D3: Job Detail View** — full evaluation context, action bar, score bars, resume comparison, AI analysis, filter journey
+- **D4: Operations Page** — subprocess-based pipeline trigger (scrape/filter/evaluate/full pipeline)
+- **D8: Tests** — 14 tests for status actions, score display, formatting, pipeline runner
+
+#### Verification
+
+ruff check (0 errors), mypy (0 errors), pytest (312 passed)
+
+---
+
+### M4 -- Content Generation + Review Workflow
+
+**Complexity: M (Medium)**
+
+#### Description
+
+Generate personalized application materials (cover letters, "why this company?" answers) for shortlisted jobs, and deliver the "Ready to Apply" workflow in the dashboard. This milestone merges the original M4 (Content Generation) and the remaining parts of the original M5 (Dashboard Review Workflow) that were not already delivered by M3.5.
+
+M3.5 already delivered: pipeline review cards, job detail view, shortlist/skip actions, evaluation display, operations panel, AI cost settings. This milestone adds the content generation backend and the application-stage dashboard views.
+
+#### Dependencies
+
+M3 (evaluated and scored jobs, resume recommendation, AI client wrappers), M3.5 (dashboard command center, status actions, pipeline review UI).
 
 #### Task List
 
@@ -565,10 +601,22 @@ M3 (evaluated and scored jobs, resume recommendation, AI client wrappers).
   - [ ] Connect company attributes to user's experience and values
   - [ ] Store in DS6 with metadata
 - [ ] *(Post-MVP)* **Content versioning**: multiple versions per job, regeneration support, version comparison
-- [ ] **Application package assembly** (DS7):
-  - [ ] Bundle: job link, recommended resume, best cover letter version, best "why" answer version
-  - [ ] Mark package as ready for review
-- [ ] CLI integration: `python run.py --generate`
+- [ ] **"Ready to Apply" dashboard view**:
+  - [ ] List of jobs with status `ready_to_apply` (from DS7 ApplicationStatus)
+  - [ ] For each job: job link, recommended resume, cover letter, "why this company?" answer
+  - [ ] Copy-to-clipboard buttons for generated text
+  - [ ] Mark as "Applied" button with optional notes field
+  - [ ] Integrates with existing M3.5 job detail page (enable the disabled Cover Letter button)
+- [ ] **Cover letter viewer in Job Detail**:
+  - [ ] Display generated cover letter in the existing job detail page
+  - [ ] Regenerate button (re-run generation with updated prompt)
+  - [ ] "Why this company?" section alongside cover letter
+- [ ] **Application status tracking** (extends DS7):
+  - [ ] Extended transitions: `shortlisted` -> `ready_to_apply` -> `applied` -> `interviewing` -> `offer`/`rejected`/`withdrawn`
+  - [ ] Status change history with timestamps (already append-only from M3.5)
+  - [ ] Application pipeline funnel stats on home page (extends M3.5 funnel)
+- [ ] CLI integration: `python run.py generate`
+- [ ] Dashboard: Operations page gains "Generate" button (extends M3.5 operations panel)
 - [ ] Write unit tests with mocked AI responses
 - [ ] Write integration test: generate materials for a sample evaluated job
 
@@ -583,83 +631,36 @@ M3 (evaluated and scored jobs, resume recommendation, AI client wrappers).
 
 #### Acceptance Criteria
 
-1. A personalized cover letter is generated for each job with `strong_match` or `good_match` recommendation.
+1. A personalized cover letter is generated for each shortlisted job.
 2. Cover letter references specific job requirements and maps them to resume achievements.
 3. "Why this company?" answer is generated using job description and resume context.
 4. Generated content is stored in DS5 (cover letter) and DS6 (why-company) with model/cost metadata.
-5. Application status (DS7) is updated to `ready_to_apply` for jobs with generated materials.
+5. "Ready to Apply" dashboard view shows complete application package (link, resume, cover letter, "why" answer).
+6. Cover Letter button in job detail page (M3.5) is functional, displaying generated content.
+7. "Applied" status can be set from the dashboard with optional notes.
+8. Operations page includes a "Generate" button for triggering content generation.
 
 ---
 
-### M5 -- Dashboard Review Workflow
+### M5 -- UX Improvements
 
 **Complexity: M (Medium)**
 
 #### Description
 
-Extend the M1.5 dashboard shell with the job review workflow: evaluated job listing with AI scores, detailed evaluation views, approve/reject/shortlist actions, "Ready to Apply" view with generated materials, and application status tracking. The app scaffold, DB connection, session state, resume pages, scraper config, and raw job browser already exist from M1.5.
+Dedicated UX improvement pass based on real usage feedback accumulated during M0–M4. Scope will be fully defined after M4 is complete and the system has been used end-to-end. Potential areas include: manual override for ambiguous Tier 1 filter results, bulk actions, keyboard shortcuts, saved filter presets, improved mobile layout, quick-reject reasons, and dashboard performance optimizations.
 
 #### Dependencies
 
-M4 (evaluated jobs, generated content, application packages), M1.5 (existing dashboard shell and navigation).
+M4 (complete end-to-end pipeline with content generation and review workflow).
 
 #### Task List
 
-- [ ] **Evaluated job listing view** (extends M1.5 raw jobs browser):
-  - [ ] Paginated table of processed jobs with AI scores
-  - [ ] Filters: match score range, source site, date range, status, salary range, recommendation level
-  - [ ] Sortable columns: score, date posted, salary, company
-  - [ ] Color coding by recommendation (strong=green, good=blue, weak=yellow, no_match=red)
-  - [ ] Quick-action buttons: approve, reject, shortlist
-  - [ ] Bulk actions: select multiple jobs and change status
-- [ ] **Job detail view**:
-  - [ ] Full job description (rendered HTML or clean text)
-  - [ ] Tier 1 filter results with reasons
-  - [ ] Tier 2 quick score (if applicable)
-  - [ ] Tier 3 deep evaluation: all scoring dimensions, strengths, gaps, recommendation
-  - [ ] Source URL link (open in browser)
-  - [ ] Company research data (if available)
-- [ ] **Side-by-side comparison view**:
-  - [ ] Left panel: job requirements (extracted key points)
-  - [ ] Right panel: resume highlights (matching experience/skills)
-  - [ ] Visual match indicators
-- [ ] **Approve/reject/shortlist workflow**:
-  - [ ] Status buttons on job detail and job list views
-  - [ ] Confirmation dialog for reject (prevent accidental rejection)
-  - [ ] Batch status updates
-  - [ ] Status filter presets: "Needs Review", "Shortlisted", "Ready to Apply"
-- [ ] **"Ready to Apply" view**:
-  - [ ] List of jobs with status `ready_to_apply`
-  - [ ] For each job display: job link, recommended resume, cover letter, "why this company?" answer
-  - [ ] Copy-to-clipboard buttons for generated text
-  - [ ] Mark as "Applied" button with optional notes field
-- [ ] **Application status tracking pipeline** (DS7):
-  - [ ] State machine: `new` -> `reviewed` -> `shortlisted` -> `applying` -> `applied` -> `interviewing` -> `offer`/`rejected`/`withdrawn`
-  - [ ] Status change history with timestamps
-  - [ ] Dashboard view: Kanban-style or pipeline funnel visualization
-  - [ ] Stats: conversion rates between stages
-- [ ] *(Post-MVP)* **Cost dashboard**: token usage charts, tier/provider breakdown, budget tracking
-- [ ] **General UI enhancements**:
-  - [ ] Loading indicators for database queries
-  - [ ] Error handling with user-friendly messages
-- [ ] Write integration tests for review workflow data queries
-
-#### Key Risks and Mitigations
-
-| Risk | Impact | Mitigation |
-| ---- | ------ | ---------- |
-| Streamlit performance with large datasets | Medium | Paginate all list views; use database-level filtering (not Python-side); cache expensive queries. |
-| Scope creep from UX feature requests | Medium | Stick to defined task list for M5; defer enhancements to M7. |
-| Streamlit limitations for complex layouts | Low | Use st.columns, st.tabs, st.expander for layout; accept Streamlit conventions rather than fighting them. |
+*To be defined after M4 completion based on accumulated usage feedback.*
 
 #### Acceptance Criteria
 
-1. Evaluated job listing view displays all processed jobs with working filters (score, source, date, status, salary).
-2. Job detail view shows full evaluation data including all scoring dimensions.
-3. Clicking "Approve" or "Reject" updates job status in the database and reflects immediately in the UI.
-4. "Ready to Apply" view shows complete application package (link, resume, cover letter, "why" answer).
-5. Application status can be updated (shortlist, apply, reject) from the dashboard.
-6. Navigation integrates seamlessly with existing M1.5 pages.
+*To be defined after M4 completion.*
 
 ---
 
@@ -673,7 +674,7 @@ Wire the full pipeline into an automated workflow that runs on a schedule via Wi
 
 #### Dependencies
 
-M5 (complete pipeline and dashboard).
+M4 (complete pipeline with content generation). Can proceed in parallel with M5 (UX Improvements).
 
 #### Task List
 
@@ -725,17 +726,17 @@ M5 (complete pipeline and dashboard).
 
 ---
 
-### M7 -- Polish & Optimization
+### M7 -- Integration Testing & Polish
 
 **Complexity: M (Medium)**
 
 #### Description
 
-Refine the system based on real-world usage. Optimize database query performance for growing job databases, tune AI prompts using actual evaluation feedback, improve the dashboard UX, and add data export capabilities. This milestone also delivers documentation and the final setup guide, making the tool ready for long-term personal use.
+Refine the system based on real-world usage. Optimize database query performance for growing job databases, tune AI prompts using actual evaluation feedback, and add data export capabilities. This milestone also delivers documentation and the final setup guide, making the tool ready for long-term personal use.
 
 #### Dependencies
 
-M6 (complete automated system running for at least 1-2 weeks).
+M5 (UX improvements), M6 (complete automated system running for at least 1-2 weeks).
 
 #### Task List
 
@@ -751,12 +752,6 @@ M6 (complete automated system running for at least 1-2 weeks).
   - [ ] Iterate on prompt templates to improve precision
   - [ ] A/B test prompt variants (track prompt version in DS4)
   - [ ] Tune scoring thresholds based on observed distribution
-- [ ] **Dashboard UX improvements**:
-  - [ ] Address usability issues discovered during usage
-  - [ ] Add keyboard shortcuts for common actions
-  - [ ] Improve mobile/narrow-screen layout (if applicable)
-  - [ ] Add "quick reject" reasons (dropdown: wrong level, wrong domain, bad location, etc.)
-  - [ ] Saved filter presets
 - [ ] **Cost optimization**:
   - [ ] Analyze token usage patterns; identify wasted tokens (overly long prompts, unnecessary context)
   - [ ] Optimize prompt length without sacrificing quality
