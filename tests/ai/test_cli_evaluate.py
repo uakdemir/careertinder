@@ -1,5 +1,6 @@
 """Tests for CLI evaluate command."""
 
+import sys
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -17,16 +18,22 @@ def _mock_evaluate_deps(run_result: EvaluationRunResult | None = None):
     mock_session.__enter__ = MagicMock(return_value=mock_session)
     mock_session.__exit__ = MagicMock(return_value=False)
 
+    # Temporarily inject a fake openai_client module if openai isn't installed
+    fake_modules: dict[str, MagicMock] = {}
+    for mod_name in ("openai", "jobhunter.ai.openai_client"):
+        if mod_name not in sys.modules:
+            fake_modules[mod_name] = MagicMock()
+
     with (
+        patch.dict(sys.modules, fake_modules),
         patch("jobhunter.cli.load_config", return_value=AppConfig()),
         patch("jobhunter.cli.SecretsConfig") as mock_secrets_cls,
         patch("jobhunter.ai.evaluator.EvaluationService") as mock_svc_cls,
-        patch("jobhunter.ai.claude_client.ClaudeClient"),
         patch("jobhunter.db.session.create_engine"),
         patch("jobhunter.db.session.get_session", return_value=mock_session),
         patch("jobhunter.db.settings.get_ai_cost_config", return_value=AICostConfig()),
     ):
-        mock_secrets_cls.return_value = MagicMock(anthropic_api_key="test-key")
+        mock_secrets_cls.return_value = MagicMock(openai_api_key="test-key")
         mock_svc = MagicMock()
 
         async def mock_run(**kwargs):
@@ -39,28 +46,28 @@ def _mock_evaluate_deps(run_result: EvaluationRunResult | None = None):
 
 class TestCliEvaluateCommand:
     def test_evaluate_missing_api_key(self, tmp_path) -> None:
-        """Evaluate should fail if ANTHROPIC_API_KEY is not set."""
+        """Evaluate should fail if OPENAI_API_KEY is not set (default provider is openai)."""
         runner = CliRunner()
         config_path = tmp_path / "config.yaml"
         config_path.write_text("{}", encoding="utf-8")
 
         with patch("jobhunter.cli.load_config", return_value=AppConfig()):
             with patch("jobhunter.cli.SecretsConfig") as mock_secrets:
-                mock_secrets.return_value = MagicMock(anthropic_api_key=None)
+                mock_secrets.return_value = MagicMock(openai_api_key=None)
                 result = runner.invoke(cli, ["--config", str(config_path), "evaluate"])
 
         assert result.exit_code != 0
-        assert "ANTHROPIC_API_KEY" in result.output
+        assert "OPENAI_API_KEY" in result.output
 
     def test_evaluate_unsupported_provider(self, tmp_path) -> None:
-        """Evaluate should fail if provider is not 'anthropic'."""
+        """Evaluate should fail if provider is not 'anthropic' or 'openai'."""
         runner = CliRunner()
         config_path = tmp_path / "config.yaml"
         config_path.write_text("{}", encoding="utf-8")
 
         config = AppConfig(
             ai_models=AIModelsConfig(
-                tier2=AIModelConfig(provider="openai", model="gpt-4o-mini"),
+                tier2=AIModelConfig(provider="gemini", model="gemini-pro"),
             )
         )
 

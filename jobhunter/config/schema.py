@@ -190,8 +190,8 @@ class AICostConfig(BaseModel):
 class AIModelConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    provider: str = "anthropic"
-    model: str = "claude-3-5-haiku-latest"
+    provider: str = "openai"
+    model: str = "gpt-5-nano"
     max_tokens: int = 300
     temperature: float = Field(default=0.1, ge=0.0, le=1.0)
 
@@ -200,8 +200,8 @@ class AIModelsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     tier2: AIModelConfig = AIModelConfig()
-    tier3: AIModelConfig = AIModelConfig(model="claude-sonnet-4-20250514", max_tokens=2000, temperature=0.3)
-    content_gen: AIModelConfig = AIModelConfig(provider="openai", model="gpt-4o", max_tokens=2000, temperature=0.5)
+    tier3: AIModelConfig = AIModelConfig(model="gpt-5.2", max_tokens=2000, temperature=0.3)
+    content_gen: AIModelConfig = AIModelConfig(model="gpt-5.4", max_tokens=2000, temperature=0.5)
 
 
 class DatabaseConfig(BaseModel):

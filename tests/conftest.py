@@ -45,14 +45,14 @@ def sample_config_dict():
         },
         "ai_models": {
             "tier2": {
-                "provider": "anthropic", "model": "claude-3-5-haiku-latest",
+                "provider": "openai", "model": "gpt-5-nano",
                 "max_tokens": 300, "temperature": 0.1,
             },
             "tier3": {
-                "provider": "anthropic", "model": "claude-sonnet-4-20250514",
+                "provider": "openai", "model": "gpt-5.2",
                 "max_tokens": 2000, "temperature": 0.3,
             },
-            "content_gen": {"provider": "openai", "model": "gpt-4o", "max_tokens": 2000, "temperature": 0.5},
+            "content_gen": {"provider": "openai", "model": "gpt-5.4", "max_tokens": 2000, "temperature": 0.5},
         },
         "database": {"path": "data/test.db", "echo_sql": False},
         "dashboard": {"port": 8501, "page_size": 25},

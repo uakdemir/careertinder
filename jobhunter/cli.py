@@ -118,19 +118,26 @@ def evaluate(ctx: click.Context, tier2_only: bool, dry_run: bool, force: bool) -
     config = _load_config(ctx)
     secrets = SecretsConfig()
 
-    # Validate providers — only Anthropic is implemented in M3
-    for tier_name in ("tier2", "tier3"):
-        provider = getattr(config.ai_models, tier_name).provider
-        if provider != "anthropic":
-            raise click.ClickException(
-                f"Unsupported AI provider for {tier_name}: '{provider}'. "
-                "Only 'anthropic' is implemented in M3."
-            )
+    # Determine provider from tier2 config (tier2 and tier3 must use same provider)
+    provider = config.ai_models.tier2.provider
+    if provider == "anthropic":
+        if not secrets.anthropic_api_key:
+            raise click.ClickException("ANTHROPIC_API_KEY not set in .env")
+        from jobhunter.ai.claude_client import AIClient, ClaudeClient
 
-    if not secrets.anthropic_api_key:
-        raise click.ClickException("ANTHROPIC_API_KEY not set in .env")
+        client: AIClient = ClaudeClient(api_key=secrets.anthropic_api_key)
+    elif provider == "openai":
+        if not secrets.openai_api_key:
+            raise click.ClickException("OPENAI_API_KEY not set in .env")
+        from jobhunter.ai.openai_client import OpenAIClient
 
-    from jobhunter.ai.claude_client import ClaudeClient
+        client = OpenAIClient(api_key=secrets.openai_api_key)
+    else:
+        raise click.ClickException(
+            f"Unsupported AI provider: '{provider}'. "
+            "Use 'anthropic' or 'openai'."
+        )
+
     from jobhunter.ai.evaluator import EvaluationService
     from jobhunter.db.session import create_engine, get_session
     from jobhunter.db.settings import get_ai_cost_config
@@ -138,7 +145,6 @@ def evaluate(ctx: click.Context, tier2_only: bool, dry_run: bool, force: bool) -
     create_engine(config.database)
 
     with get_session() as session:
-        client = ClaudeClient(api_key=secrets.anthropic_api_key)
         cost_config = get_ai_cost_config(session)
         service = EvaluationService(session, client, config.ai_models, cost_config)
 

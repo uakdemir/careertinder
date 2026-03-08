@@ -13,8 +13,11 @@ from jobhunter.ai.claude_client import AIResponse
 
 logger = logging.getLogger(__name__)
 
-# Pricing per 1M tokens (input, output)
+# Pricing per 1M tokens (input, output) — Flex mode rates from M3.5 §15
 OPENAI_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "gpt-5-nano": (0.025, 0.20),
+    "gpt-5.2": (0.875, 7.00),
+    "gpt-5.4": (1.25, 7.50),
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
 }
