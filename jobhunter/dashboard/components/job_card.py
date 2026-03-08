@@ -67,7 +67,25 @@ def render_tier3_card(
         f"{raw_job.title} @ {raw_job.company}"
     )
 
+    # Status-aware card border styling via CSS injection
+    if current_status == "shortlisted":
+        border_css = "border: 2px solid #28a745 !important;"  # green solid
+    elif current_status == "rejected_by_user":
+        border_css = "border: 2px dashed #6c757d !important;"  # grey dashed
+    else:
+        border_css = "border: 2px solid #4a90d9 !important;"  # blue solid
+
+    card_cls = f"jh-card-{job.job_id}"
+    st.markdown(
+        f"<style>"
+        f"div[data-testid='stVerticalBlockBorderWrapper']:has(.{card_cls})"
+        f" {{ {border_css} border-radius: 8px; }}"
+        f"</style>",
+        unsafe_allow_html=True,
+    )
+
     with st.container(border=True):
+        st.markdown(f'<span class="{card_cls}"></span>', unsafe_allow_html=True)
         st.markdown(header)
         st.caption(f"{resume_label or '—'} | {location} | {salary}")
 

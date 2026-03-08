@@ -52,6 +52,13 @@ class OpenAIClient:
         """
         last_error: Exception | None = None
 
+        logger.debug(
+            "OpenAI request: model=%s, max_tokens=%d, temperature=%.1f, "
+            "service_tier=%s, system_prompt_len=%d, user_prompt_len=%d",
+            model, max_tokens, temperature, self._service_tier,
+            len(system_prompt), len(user_prompt),
+        )
+
         for attempt in range(max_retries):
             try:
                 response = await asyncio.to_thread(
@@ -65,7 +72,23 @@ class OpenAIClient:
 
                 choice = response.choices[0] if response.choices else None
                 content = choice.message.content if choice and choice.message else ""
+                finish_reason = choice.finish_reason if choice else None
+
+                logger.debug(
+                    "OpenAI response: model=%s, finish_reason=%s, "
+                    "content_len=%d, choices=%d, content_preview=%.200s",
+                    model, finish_reason,
+                    len(content) if content else 0,
+                    len(response.choices) if response.choices else 0,
+                    content[:200] if content else "<empty>",
+                )
+
                 if not content:
+                    refusal = getattr(choice.message, "refusal", None) if choice and choice.message else None
+                    logger.warning(
+                        "Empty content from OpenAI: finish_reason=%s, refusal=%s, choices=%d",
+                        finish_reason, refusal, len(response.choices) if response.choices else 0,
+                    )
                     raise ValueError("Empty response from OpenAI")
 
                 prompt_tokens = response.usage.prompt_tokens if response.usage else 0
@@ -114,6 +137,9 @@ class OpenAIClient:
 
         raise RuntimeError(f"Exhausted {max_retries} retries for OpenAI API call") from last_error
 
+    # GPT-5 family models are reasoning models that reject custom temperature
+    _NO_TEMPERATURE_MODELS = frozenset({"gpt-5-nano", "gpt-5-mini", "gpt-5", "gpt-5.2", "gpt-5.4"})
+
     def _create_completion(
         self,
         model: str,
@@ -123,16 +149,18 @@ class OpenAIClient:
         user_prompt: str,
     ):  # type: ignore[no-untyped-def]
         """Create a chat completion (called via asyncio.to_thread)."""
-        return self._client.chat.completions.create(
-            model=model,
-            max_completion_tokens=max_tokens,
-            temperature=temperature,
-            service_tier=self._service_tier,
-            messages=[
+        kwargs: dict[str, object] = {
+            "model": model,
+            "max_completion_tokens": max_tokens,
+            "service_tier": self._service_tier,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-        )
+        }
+        if model not in self._NO_TEMPERATURE_MODELS:
+            kwargs["temperature"] = temperature
+        return self._client.chat.completions.create(**kwargs)  # type: ignore[call-overload]
 
     def _estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
         """Estimate USD cost from token counts and model pricing."""

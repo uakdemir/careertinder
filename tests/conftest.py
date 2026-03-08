@@ -46,7 +46,7 @@ def sample_config_dict():
         "ai_models": {
             "tier2": {
                 "provider": "openai", "model": "gpt-5-nano",
-                "max_tokens": 300, "temperature": 0.1,
+                "max_tokens": 2000, "temperature": 0.1,
             },
             "tier3": {
                 "provider": "openai", "model": "gpt-5.2",

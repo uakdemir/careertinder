@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from jobhunter.dashboard.components.pipeline_runner import run_pipeline_command
-from jobhunter.db.models import ProcessedJob, RawJobPosting
+from jobhunter.db.models import FilterResult, ProcessedJob, RawJobPosting
 from jobhunter.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -21,14 +21,15 @@ logger = logging.getLogger(__name__)
 def _get_pending_counts(session: Session) -> dict[str, int]:
     """Get counts of jobs pending each pipeline stage."""
     raw_total = session.query(func.count(RawJobPosting.raw_id)).scalar() or 0
-    processed_total = session.query(func.count(ProcessedJob.job_id)).scalar() or 0
-    new_status = (
-        session.query(func.count(ProcessedJob.job_id))
-        .filter(ProcessedJob.status == "new")
+
+    # Unfiltered = raw jobs that have no FilterResult yet (matches filter service query)
+    unfiltered = (
+        session.query(func.count(RawJobPosting.raw_id))
+        .outerjoin(FilterResult, RawJobPosting.raw_id == FilterResult.raw_id)
+        .filter(FilterResult.filter_id.is_(None))
         .scalar()
         or 0
     )
-    unfiltered = (raw_total - processed_total) + new_status
 
     awaiting_eval = (
         session.query(func.count(ProcessedJob.job_id))
@@ -49,7 +50,6 @@ def _get_pending_counts(session: Session) -> dict[str, int]:
         "awaiting_eval": awaiting_eval,
         "awaiting_t3": awaiting_t3,
         "raw_total": raw_total,
-        "processed_total": processed_total,
     }
 
 

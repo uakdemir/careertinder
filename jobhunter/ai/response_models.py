@@ -8,7 +8,7 @@ class Tier2Response(BaseModel):
 
     decision: str = Field(pattern=r"^(yes|no|maybe)$")
     confidence: float = Field(ge=0.0, le=1.0)
-    reasoning: str = Field(min_length=10, max_length=500)
+    reasoning: str = Field(min_length=10, max_length=2000)
     flags: list[str] = Field(default_factory=list)
 
 

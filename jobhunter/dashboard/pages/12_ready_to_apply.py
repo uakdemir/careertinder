@@ -120,12 +120,11 @@ def _render_application_card(data: dict, session: Session) -> None:
                 st.switch_page("pages/2_job_detail.py")
         with col3:
             with st.form(key=f"notes_form_{job.job_id}"):
-                notes = st.text_input("Notes", placeholder="Optional notes...")
+                notes = st.text_input("Notes", placeholder="Add a note...")
                 if st.form_submit_button("Save Note"):
-                    if notes:
-                        transition_job_status(session, job.job_id, "shortlisted", notes=notes)
-                        session.commit()
-                        st.rerun()
+                    transition_job_status(session, job.job_id, "shortlisted", notes=notes or None)
+                    session.commit()
+                    st.rerun()
 
 
 def main() -> None:

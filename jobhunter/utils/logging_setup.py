@@ -3,6 +3,7 @@ import logging.handlers
 from pathlib import Path
 
 LOG_DIR = Path("logs")
+ERROR_LOG_PATH = Path("tmp/error_logs.txt")
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 
 
@@ -12,9 +13,11 @@ def configure_logging(verbose: bool = False) -> None:
     - Root logger: WARNING level
     - jobhunter.* loggers: INFO (or DEBUG if verbose)
     - File handler: rotating, daily, 30-day retention, logs/ directory
+    - Error file handler: ERROR+ only, written to tmp/error_logs.txt
     - Console handler: human-readable format
     """
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.WARNING)
@@ -41,3 +44,13 @@ def configure_logging(verbose: bool = False) -> None:
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.DEBUG)
     app_logger.addHandler(file_handler)
+
+    # Error-only file handler (tmp/error_logs.txt) for AI-assisted debugging
+    error_handler = logging.FileHandler(
+        filename=ERROR_LOG_PATH,
+        mode="a",
+        encoding="utf-8",
+    )
+    error_handler.setFormatter(formatter)
+    error_handler.setLevel(logging.ERROR)
+    app_logger.addHandler(error_handler)

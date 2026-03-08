@@ -91,20 +91,24 @@ def _render_action_bar(session: Session, job: ProcessedJob, raw_job: RawJobPosti
         if current == "shortlisted":
             if st.button("Remove Shortlist", key="jd_unshort", use_container_width=True):
                 transition_job_status(session, job.job_id, "reviewed")
+                session.commit()
                 st.rerun()
         else:
             if st.button("Shortlist", key="jd_short", type="primary", use_container_width=True):
                 transition_job_status(session, job.job_id, "shortlisted")
+                session.commit()
                 st.rerun()
 
     with col2:
         if current == "rejected_by_user":
             if st.button("Undo Skip", key="jd_unskip", use_container_width=True):
                 transition_job_status(session, job.job_id, "reviewed")
+                session.commit()
                 st.rerun()
         else:
             if st.button("Skip", key="jd_skip", use_container_width=True):
                 transition_job_status(session, job.job_id, "rejected_by_user")
+                session.commit()
                 st.rerun()
 
     with col3:
@@ -113,6 +117,7 @@ def _render_action_bar(session: Session, job: ProcessedJob, raw_job: RawJobPosti
         else:
             if st.button("Mark Applied", key="jd_apply", use_container_width=True):
                 transition_job_status(session, job.job_id, "applied")
+                session.commit()
                 st.rerun()
 
     with col4:

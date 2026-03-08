@@ -96,16 +96,16 @@ def _get_attention_items(session: Session) -> list[dict[str, str]]:
 
     items: list[dict[str, str]] = []
 
-    # 1. Unfiltered raw jobs
-    raw_total = session.query(func.count(RawJobPosting.raw_id)).scalar() or 0
-    processed_total = session.query(func.count(ProcessedJob.job_id)).scalar() or 0
-    new_count = (
-        session.query(func.count(ProcessedJob.job_id))
-        .filter(ProcessedJob.status == "new")
+    # 1. Unfiltered raw jobs (those without a FilterResult)
+    from jobhunter.db.models import FilterResult
+
+    unfiltered = (
+        session.query(func.count(RawJobPosting.raw_id))
+        .outerjoin(FilterResult, RawJobPosting.raw_id == FilterResult.raw_id)
+        .filter(FilterResult.filter_id.is_(None))
         .scalar()
         or 0
     )
-    unfiltered = (raw_total - processed_total) + new_count
     if unfiltered > 0:
         items.append({
             "icon": "warning",
@@ -329,6 +329,7 @@ pg = st.navigation(
             st.Page("pages/2_job_detail.py", title="Job Detail", icon=":material/search:"),
             st.Page("pages/3_operations.py", title="Operations", icon=":material/play_circle:"),
             st.Page("pages/12_ready_to_apply.py", title="Ready to Apply", icon=":material/send:"),
+            st.Page("pages/13_applied_jobs.py", title="Applied Jobs", icon=":material/check_circle:"),
         ],
         "Configure": [
             st.Page("pages/4_resume_management.py", title="Resumes", icon=":material/description:"),
