@@ -214,8 +214,8 @@ logs/
 config.yaml
 
 # IDE
-.vscode/
-.idea/
+.vscode
+.idea
 
 # OS
 Thumbs.db
@@ -223,3 +223,32 @@ Thumbs.db
 
 # Temporary files
 tmp/
+
+# Shell dotfiles (WSL2 home directory leakage)
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+
+# Git bare artifacts (WSL2/worktree leakage)
+/HEAD
+/objects
+/refs
+/hooks
+/config
+
+# Git config
+.gitconfig
+.gitmodules
+
+# Claude Code local/personal
+.claude/settings.local.json
+.claude/agents
+.claude/commands
+.mcp.json
+.ripgreprc
+
+# Personal
+prep.md
+.claude/settings.local.json
