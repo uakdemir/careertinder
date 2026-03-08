@@ -8,24 +8,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import streamlit as st
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from jobhunter.config.loader import load_config
 from jobhunter.config.schema import ConfigurationError
-from jobhunter.db.models import RawJobPosting, ResumeProfile, ScraperRun
-from jobhunter.db.session import create_engine, get_session
+from jobhunter.db.session import create_engine
 
 logger = logging.getLogger(__name__)
 
 
-def init_app() -> None:
-    """Initialize Streamlit app: page config, DB engine, sidebar status."""
-    st.set_page_config(
-        page_title="JobHunter",
-        page_icon=":briefcase:",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-
+def _init_db() -> None:
+    """Initialize DB engine and config on first run."""
     if "db_initialized" not in st.session_state:
         try:
             config = load_config(Path("config.yaml"))
@@ -39,79 +33,316 @@ def init_app() -> None:
         st.session_state.db_initialized = True
 
 
-def _render_sidebar_status() -> None:
-    """Render status indicators in the sidebar."""
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Status**")
-    try:
-        with get_session() as session:
-            job_count = session.query(RawJobPosting).count()
-            run_count = session.query(ScraperRun).count()
-            resume_count = session.query(ResumeProfile).count()
-
-            last_run = (
-                session.query(ScraperRun)
-                .order_by(ScraperRun.run_id.desc())
-                .first()
-            )
-            last_scrape_text = _format_relative_time(last_run.started_at) if last_run else "Never"
-
-        st.sidebar.markdown("DB: Connected")
-        st.sidebar.markdown(f"Jobs: **{job_count}**")
-        st.sidebar.markdown(f"Resumes: **{resume_count}**")
-        st.sidebar.markdown(f"Runs: **{run_count}**")
-        st.sidebar.markdown(f"Last scrape: {last_scrape_text}")
-    except RuntimeError:
-        st.sidebar.markdown("DB: Not initialized")
+# ---------------------------------------------------------------------------
+# D1: Funnel Home Page
+# ---------------------------------------------------------------------------
 
 
-def _format_relative_time(dt: datetime | None) -> str:
-    """Format a datetime as a human-readable relative time string."""
-    if dt is None:
-        return "Never"
-    now = datetime.now(UTC)
-    # Handle naive datetimes from SQLite
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    diff = now - dt
-    seconds = int(diff.total_seconds())
-    if seconds < 60:
-        return "just now"
-    if seconds < 3600:
-        minutes = seconds // 60
-        return f"{minutes}m ago"
-    if seconds < 86400:
-        hours = seconds // 3600
-        return f"{hours}h ago"
-    days = seconds // 86400
-    return f"{days}d ago"
+def _get_funnel_counts(session: Session) -> dict[str, int]:
+    """Query pipeline stage counts from ProcessedJob.status + DS7."""
+    from jobhunter.dashboard.components.status_actions import latest_user_status_subquery
+    from jobhunter.db.models import ProcessedJob, RawJobPosting
+
+    scraped = session.query(func.count(RawJobPosting.raw_id)).scalar() or 0
+
+    filtered = (
+        session.query(func.count(ProcessedJob.job_id))
+        .filter(ProcessedJob.status != "new")
+        .scalar()
+        or 0
+    )
+
+    evaluated = (
+        session.query(func.count(ProcessedJob.job_id))
+        .filter(ProcessedJob.status == "evaluated")
+        .scalar()
+        or 0
+    )
+
+    # Shortlisted / Applied from DS7
+    ds7 = latest_user_status_subquery()
+    shortlisted = (
+        session.query(func.count(ds7.c.job_id))
+        .filter(ds7.c.user_status == "shortlisted")
+        .scalar()
+        or 0
+    )
+    applied = (
+        session.query(func.count(ds7.c.job_id))
+        .filter(ds7.c.user_status == "applied")
+        .scalar()
+        or 0
+    )
+
+    return {
+        "scraped": scraped,
+        "filtered": filtered,
+        "evaluated": evaluated,
+        "shortlisted": shortlisted,
+        "applied": applied,
+    }
 
 
-def main() -> None:
-    """Main dashboard entry point — renders the Home page."""
-    init_app()
+def _get_attention_items(session: Session) -> list[dict[str, str]]:
+    """Identify items needing user attention."""
+    from jobhunter.dashboard.components.status_actions import latest_user_status_subquery
+    from jobhunter.db.models import (
+        MatchEvaluation,
+        ProcessedJob,
+        RawJobPosting,
+        ResumeProfile,
+    )
+    from jobhunter.db.settings import get_ai_cost_config
 
-    st.title("JobHunter Dashboard")
-    st.markdown("Job Search Automation Platform")
+    items: list[dict[str, str]] = []
 
-    # Summary metrics
-    try:
-        with get_session() as session:
-            raw_count = session.query(RawJobPosting).count()
-            run_count = session.query(ScraperRun).count()
-            resume_count = session.query(ResumeProfile).count()
-    except RuntimeError:
-        st.warning("Database not initialized. Run `python run.py init-db` first.")
+    # 1. Unfiltered raw jobs
+    raw_total = session.query(func.count(RawJobPosting.raw_id)).scalar() or 0
+    processed_total = session.query(func.count(ProcessedJob.job_id)).scalar() or 0
+    new_count = (
+        session.query(func.count(ProcessedJob.job_id))
+        .filter(ProcessedJob.status == "new")
+        .scalar()
+        or 0
+    )
+    unfiltered = (raw_total - processed_total) + new_count
+    if unfiltered > 0:
+        items.append({
+            "icon": "warning",
+            "message": f"{unfiltered} new jobs need filtering",
+            "priority": "high",
+        })
+
+    # 2. Filtered jobs awaiting evaluation
+    awaiting_eval = (
+        session.query(func.count(ProcessedJob.job_id))
+        .filter(ProcessedJob.status.in_(["tier1_pass", "tier1_ambiguous"]))
+        .scalar()
+        or 0
+    )
+    if awaiting_eval > 0:
+        items.append({
+            "icon": "warning",
+            "message": f"{awaiting_eval} filtered jobs awaiting AI evaluation",
+            "priority": "high",
+        })
+
+    # 3. Evaluated jobs not yet reviewed
+    ds7 = latest_user_status_subquery()
+    needs_review = (
+        session.query(func.count(ProcessedJob.job_id))
+        .outerjoin(ds7, ProcessedJob.job_id == ds7.c.job_id)
+        .filter(
+            ProcessedJob.status == "evaluated",
+            (ds7.c.user_status.is_(None)) | (ds7.c.user_status.in_(["new", "reviewed"])),
+        )
+        .scalar()
+        or 0
+    )
+    if needs_review > 0:
+        items.append({
+            "icon": "star",
+            "message": f"{needs_review} evaluated jobs need your review",
+            "priority": "high",
+        })
+
+    # 4. Cost cap check
+    cost_config = get_ai_cost_config(session)
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_spend = (
+        session.query(func.coalesce(func.sum(MatchEvaluation.cost_usd), 0.0))
+        .filter(MatchEvaluation.evaluated_at >= today_start)
+        .scalar()
+    ) or 0.0
+
+    if cost_config.daily_cap_usd > 0:
+        pct = today_spend / cost_config.daily_cap_usd
+        if pct >= 1.0:
+            items.append({
+                "icon": "error",
+                "message": "Daily AI cost cap reached — evaluation paused",
+                "priority": "high",
+            })
+        elif pct >= cost_config.warn_at_percent:
+            remaining = cost_config.daily_cap_usd - today_spend
+            items.append({
+                "icon": "info",
+                "message": f"AI budget at {pct:.0%} — ${remaining:.2f} remaining today",
+                "priority": "medium",
+            })
+
+    # 5. No resumes
+    resume_count = session.query(func.count(ResumeProfile.resume_id)).scalar() or 0
+    if resume_count == 0:
+        items.append({
+            "icon": "warning",
+            "message": "No resumes found — upload resumes before running evaluation",
+            "priority": "high",
+        })
+
+    return items
+
+
+def _render_funnel(counts: dict[str, int]) -> None:
+    """Render the 5-stage funnel with st.columns and st.metric."""
+    st.subheader("Pipeline Funnel")
+
+    stages = [
+        ("Scraped", counts["scraped"], "total"),
+        ("Filtered", counts["filtered"], "passed T1"),
+        ("Evaluated", counts["evaluated"], "scored"),
+        ("Shortlisted", counts["shortlisted"], "saved"),
+        ("Applied", counts["applied"], "done"),
+    ]
+
+    cols = st.columns(len(stages))
+    for col, (label, value, subtitle) in zip(cols, stages, strict=True):
+        col.metric(label, value, help=subtitle)
+
+    # Conversion bar
+    if counts["scraped"] > 0:
+        pcts = [
+            counts["scraped"] / counts["scraped"],
+            counts["filtered"] / counts["scraped"],
+            counts["evaluated"] / counts["scraped"],
+            counts["shortlisted"] / counts["scraped"],
+            counts["applied"] / counts["scraped"],
+        ]
+        labels = ["Scraped", "Filtered", "Evaluated", "Shortlisted", "Applied"]
+        bar_text = "  ".join(
+            f"{lbl}: {pct:.0%}" for lbl, pct in zip(labels, pcts, strict=True)
+        )
+        st.caption(bar_text)
+
+
+def _render_attention(items: list[dict[str, str]]) -> None:
+    """Render 'Needs Attention' section."""
+    if not items:
+        st.success("All clear — no items need attention.")
         return
 
-    cols = st.columns(3)
-    cols[0].metric("Raw Jobs", raw_count)
-    cols[1].metric("Scraper Runs", run_count)
-    cols[2].metric("Resumes", resume_count)
+    st.subheader("Needs Attention")
+    for item in items:
+        icon = item["icon"]
+        msg = item["message"]
+        if icon == "error":
+            st.error(msg)
+        elif icon == "warning":
+            st.warning(msg)
+        elif icon == "star":
+            st.info(msg)
+        else:
+            st.info(msg)
 
-    # Sidebar status
-    _render_sidebar_status()
+
+def _render_quick_actions() -> None:
+    """Render quick action buttons that deep-link to Operations page."""
+    st.subheader("Quick Actions")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Run Scrape", use_container_width=True):
+            st.session_state["op_preselect"] = "scrape"
+            st.switch_page("pages/3_operations.py")
+    with col2:
+        if st.button("Run Filter", use_container_width=True):
+            st.session_state["op_preselect"] = "filter"
+            st.switch_page("pages/3_operations.py")
+    with col3:
+        if st.button("Run AI Evaluation", use_container_width=True):
+            st.session_state["op_preselect"] = "evaluate"
+            st.switch_page("pages/3_operations.py")
 
 
-if __name__ == "__main__":
-    main()
+def _render_recent_activity(session: Session) -> None:
+    """Show recent scraper runs and daily AI spend."""
+    from jobhunter.dashboard.components.formatting import format_relative_time
+    from jobhunter.db.models import ScraperRun
+
+    st.subheader("Recent Activity")
+
+    runs = (
+        session.query(ScraperRun)
+        .order_by(ScraperRun.run_id.desc())
+        .limit(5)
+        .all()
+    )
+
+    if not runs:
+        st.caption("No scraper runs yet.")
+        return
+
+    for run in runs:
+        when = format_relative_time(run.started_at)
+        status_icon = {"success": "OK", "failed": "FAIL", "running": "..."}.get(
+            run.status, run.status
+        )
+        st.caption(
+            f"{when} — {run.scraper_name}: {run.jobs_new} new jobs ({status_icon})"
+        )
+
+
+def home_page() -> None:
+    """Home page — pipeline funnel dashboard."""
+    from jobhunter.db.session import get_session
+
+    st.title("JobHunter Dashboard")
+
+    try:
+        with get_session() as session:
+            counts = _get_funnel_counts(session)
+            _render_funnel(counts)
+
+            st.divider()
+
+            attention = _get_attention_items(session)
+            _render_attention(attention)
+
+            st.divider()
+
+            _render_quick_actions()
+
+            st.divider()
+
+            _render_recent_activity(session)
+    except RuntimeError:
+        st.warning("Database not initialized. Run `python run.py init-db` first.")
+
+
+# --- App setup (runs on every Streamlit rerun) ---
+
+st.set_page_config(
+    page_title="JobHunter",
+    page_icon=":briefcase:",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+_init_db()
+
+pg = st.navigation(
+    {
+        "": [
+            st.Page(home_page, title="Home", icon=":material/home:", default=True),
+        ],
+        "Pipeline": [
+            st.Page("pages/1_pipeline_review.py", title="Pipeline Review", icon=":material/view_list:"),
+            st.Page("pages/2_job_detail.py", title="Job Detail", icon=":material/search:"),
+            st.Page("pages/3_operations.py", title="Operations", icon=":material/play_circle:"),
+            st.Page("pages/12_ready_to_apply.py", title="Ready to Apply", icon=":material/send:"),
+        ],
+        "Configure": [
+            st.Page("pages/4_resume_management.py", title="Resumes", icon=":material/description:"),
+            st.Page("pages/5_scraper_config.py", title="Scraper Config", icon=":material/language:"),
+            st.Page("pages/6_filter_config.py", title="Filter Rules", icon=":material/filter_alt:"),
+            st.Page("pages/7_ai_settings.py", title="AI Settings", icon=":material/smart_toy:"),
+        ],
+        "History": [
+            st.Page("pages/8_scraper_runs.py", title="Scraper Runs", icon=":material/history:"),
+            st.Page("pages/9_filter_results.py", title="Filter Results", icon=":material/checklist:"),
+            st.Page("pages/10_evaluations.py", title="Evaluation Log", icon=":material/analytics:"),
+            st.Page("pages/11_raw_jobs.py", title="Raw Jobs", icon=":material/database:"),
+        ],
+    }
+)
+
+pg.run()
