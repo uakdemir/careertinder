@@ -10,6 +10,7 @@ from pathlib import Path
 import streamlit as st
 from sqlalchemy.orm import Session
 
+from jobhunter.dashboard.components.formatting import format_relative_time
 from jobhunter.dashboard.components.status_badge import source_badge, status_badge
 from jobhunter.db.models import ScraperRun
 from jobhunter.db.session import get_session
@@ -20,24 +21,6 @@ PAGE_TITLE = "Scraper Runs"
 
 # Threshold in seconds for detecting stale "running" records
 _STALE_THRESHOLD_SECONDS = 3600
-
-
-def _format_relative_time(dt: datetime | None) -> str:
-    """Format a datetime as a relative time string."""
-    if dt is None:
-        return "—"
-    now = datetime.now(UTC)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    diff = now - dt
-    seconds = int(diff.total_seconds())
-    if seconds < 60:
-        return "just now"
-    if seconds < 3600:
-        return f"{seconds // 60}m ago"
-    if seconds < 86400:
-        return f"{seconds // 3600}h ago"
-    return f"{seconds // 86400}d ago"
 
 
 def _get_running_scrapers(session: Session) -> list[ScraperRun]:
@@ -100,7 +83,7 @@ def _render_trigger_section(session: Session) -> bool:
         if _is_stale(run):
             st.warning(
                 f"Stale running job detected: **{run.scraper_name}** "
-                f"(started {_format_relative_time(run.started_at)})"
+                f"(started {format_relative_time(run.started_at)})"
             )
             if st.button(f"Mark #{run.run_id} as failed", key=f"stale_{run.run_id}"):
                 run.status = "failed"
@@ -169,7 +152,7 @@ def _render_runs_table(session: Session) -> None:
         badge = status_badge(run.status)
         scraper = source_badge(run.scraper_name)
         duration = f"{run.duration_seconds:.1f}s" if run.duration_seconds else "—"
-        when = _format_relative_time(run.started_at)
+        when = format_relative_time(run.started_at)
 
         header = (
             f"#{run.run_id} | {scraper} | {badge} | "
