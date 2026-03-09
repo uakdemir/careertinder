@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import cast
 
 import streamlit as st
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from jobhunter.config.loader import load_config
 from jobhunter.db.session import create_engine, get_session
 from jobhunter.db.settings import CATEGORY_SCRAPING, get_scraping_config, update_settings
 from jobhunter.scrapers.linkedin_url_parser import (
+    build_linkedin_url,
     get_geo_name,
     get_job_function_name,
     parse_linkedin_url,
@@ -57,6 +59,23 @@ def _render_global_settings(current_timeout: int) -> int:
         key="cfg_timeout",
     )
     return timeout
+
+
+def _render_source_url_caption(profile: dict, scraper_type: str) -> None:
+    """Show source_url as caption under profile expander (for Apify scrapers)."""
+    source_url = profile.get("source_url")
+    if source_url:
+        st.caption(f"Source: {source_url}")
+    elif scraper_type == "linkedin":
+        # Reconstruct URL from profile fields for display
+        from jobhunter.config.schema import LinkedInSearchProfile
+
+        try:
+            p = LinkedInSearchProfile(**profile)
+            reconstructed = build_linkedin_url(p)
+            st.caption(f"Reconstructed: {reconstructed}")
+        except Exception:
+            pass
 
 
 def _render_linkedin_config(cfg: dict) -> dict:
@@ -111,6 +130,8 @@ def _render_linkedin_config(cfg: dict) -> dict:
         profile_label = profile.get("label", f"Profile {i + 1}")
         is_only_profile = i == 0 and len(profiles) == 1
         with st.expander(f"Profile: {profile_label}", expanded=is_only_profile):
+            _render_source_url_caption(profile, "linkedin")
+
             col_label, col_weight = st.columns([3, 1])
             with col_label:
                 label = st.text_input("Label", value=profile.get("label", ""), key=f"li_p{i}_label")
@@ -191,6 +212,7 @@ def _render_linkedin_config(cfg: dict) -> dict:
                     "job_functions": job_functions,
                     "contract_type": profile.get("contract_type", []),  # Preserve existing
                     "posted_limit": posted_limit,
+                    "source_url": profile.get("source_url"),  # Preserve source_url
                     "weight": weight,
                 })
 
@@ -206,6 +228,7 @@ def _render_linkedin_config(cfg: dict) -> dict:
             "job_functions": [],
             "contract_type": [],
             "posted_limit": None,
+            "source_url": None,
             "weight": 1,
         })
         logger.info("Added empty LinkedIn profile")
@@ -226,23 +249,87 @@ def _render_linkedin_config(cfg: dict) -> dict:
 
 
 def _render_wellfound_config(cfg: dict) -> dict:
-    """Render Wellfound (Apify) config fields. Returns form values."""
+    """Render Wellfound (Apify) config with multi-profile management."""
     st.subheader("Wellfound (Apify)")
     st.caption("Deferred: all available Apify actors require manual cookie/CAPTCHA management.")
     enabled = st.checkbox("Enabled", value=cfg.get("enabled", False), key="wf_enabled")
     actor_id = st.text_input("Actor ID", value=cfg.get("apify_actor_id", ""), key="wf_actor")
-    search_kw = st.text_input("Search Keyword", value=cfg.get("search_keyword", ""), key="wf_kw")
-    loc_filter = st.text_input("Location Filter", value=cfg.get("location_filter", ""), key="wf_loc")
-    max_results = st.number_input(
-        "Max Results", min_value=1, max_value=1000,
-        value=cfg.get("max_results", 100), key="wf_max",
+    max_results: int = st.number_input(
+        "Total Budget (max results across all profiles)",
+        min_value=1,
+        max_value=1000,
+        value=cfg.get("max_results", 100),
+        key="wf_max",
     )
+
+    # --- Search Profiles ---
+    st.markdown("#### Search Profiles")
+    st.caption("Each profile is a separate search query. Budget is split by weight.")
+
+    if "wellfound_profiles" not in st.session_state:
+        st.session_state.wellfound_profiles = list(cfg.get("search_profiles", []))
+
+    profiles: list[dict] = st.session_state.wellfound_profiles
+    profiles_to_keep: list[dict] = []
+
+    for i, profile in enumerate(profiles):
+        profile_label = profile.get("label", f"Profile {i + 1}")
+        is_only_profile = i == 0 and len(profiles) == 1
+        with st.expander(f"Profile: {profile_label}", expanded=is_only_profile):
+            source_url = profile.get("source_url")
+            if source_url:
+                st.caption(f"Source: {source_url}")
+
+            col_label, col_weight = st.columns([3, 1])
+            with col_label:
+                label = st.text_input("Label", value=profile.get("label", ""), key=f"wf_p{i}_label")
+            with col_weight:
+                weight: int = st.number_input(
+                    "Weight", min_value=1, max_value=10,
+                    value=profile.get("weight", 1), key=f"wf_p{i}_weight",
+                )
+
+            search_kw = st.text_input(
+                "Search Keyword", value=profile.get("search_keyword", ""), key=f"wf_p{i}_kw"
+            )
+            loc_filter = st.text_input(
+                "Location Filter", value=profile.get("location_filter", "remote"), key=f"wf_p{i}_loc"
+            )
+            profile_source_url = st.text_input(
+                "Source URL (optional)", value=profile.get("source_url") or "", key=f"wf_p{i}_url",
+                help="Original Wellfound search URL for traceability.",
+            )
+
+            remove = st.checkbox("Remove this profile", key=f"wf_p{i}_remove")
+            if not remove:
+                profiles_to_keep.append({
+                    "label": label,
+                    "search_keyword": search_kw,
+                    "location_filter": loc_filter,
+                    "source_url": profile_source_url.strip() or None,
+                    "weight": weight,
+                })
+
+    if st.button("Add New Profile", key="wf_add_profile"):
+        st.session_state.wellfound_profiles.append({
+            "label": "",
+            "search_keyword": "",
+            "location_filter": "remote",
+            "source_url": None,
+            "weight": 1,
+        })
+        st.rerun()
+
+    if not profiles_to_keep and not profiles:
+        st.caption("No search profiles configured — Wellfound scraper will return no results.")
+
+    st.session_state.wellfound_profiles = profiles_to_keep
+
     return {
         "enabled": enabled,
         "apify_actor_id": actor_id,
-        "search_keyword": search_kw,
-        "location_filter": loc_filter,
         "max_results": max_results,
+        "search_profiles": profiles_to_keep,
     }
 
 
@@ -251,26 +338,60 @@ def _render_playwright_config(
     cfg: dict,
     prefix: str,
 ) -> dict:
-    """Render a Playwright-based scraper config (Remote.io or RemoteRocketship)."""
+    """Render a Playwright-based scraper config with multi-profile management."""
     st.subheader(f"{label} (Playwright)")
     enabled = st.checkbox("Enabled", value=cfg.get("enabled", True), key=f"{prefix}_enabled")
-    base_url = st.text_input("Base URL", value=cfg.get("base_url", ""), key=f"{prefix}_url")
-    col1, col2 = st.columns(2)
-    with col1:
-        max_pages = st.number_input(
-            "Max Pages", min_value=1, max_value=100,
-            value=cfg.get("max_pages", 10), key=f"{prefix}_pages",
-        )
-    with col2:
-        delay = st.number_input(
-            "Delay (s)", min_value=0, max_value=30,
-            value=cfg.get("delay_seconds", 2), key=f"{prefix}_delay",
-        )
+    delay: int = st.number_input(
+        "Delay (s)", min_value=0, max_value=30,
+        value=cfg.get("delay_seconds", 2), key=f"{prefix}_delay",
+    )
+
+    # --- Search Profiles ---
+    st.markdown("#### Search Profiles")
+    st.caption("Each profile is a separate search URL.")
+
+    state_key = f"{prefix}_profiles"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = list(cfg.get("search_profiles", []))
+
+    profiles: list[dict] = st.session_state[state_key]
+    profiles_to_keep: list[dict] = []
+
+    for i, profile in enumerate(profiles):
+        profile_label = profile.get("label", f"Profile {i + 1}")
+        is_only_profile = i == 0 and len(profiles) == 1
+        with st.expander(f"Profile: {profile_label}", expanded=is_only_profile):
+            p_label = st.text_input("Label", value=profile.get("label", ""), key=f"{prefix}_p{i}_label")
+            p_url = st.text_input("URL", value=profile.get("url", ""), key=f"{prefix}_p{i}_url")
+            p_max_pages: int = st.number_input(
+                "Max Pages", min_value=1, max_value=50,
+                value=profile.get("max_pages", 5), key=f"{prefix}_p{i}_pages",
+            )
+            remove = st.checkbox("Remove this profile", key=f"{prefix}_p{i}_remove")
+            if not remove:
+                profiles_to_keep.append({
+                    "label": p_label,
+                    "url": p_url,
+                    "max_pages": p_max_pages,
+                })
+
+    if st.button("Add New Profile", key=f"{prefix}_add_profile"):
+        st.session_state[state_key].append({
+            "label": "",
+            "url": "",
+            "max_pages": 5,
+        })
+        st.rerun()
+
+    if not profiles_to_keep and not profiles:
+        st.caption(f"No search profiles configured — {label} scraper will return no results.")
+
+    st.session_state[state_key] = profiles_to_keep
+
     return {
         "enabled": enabled,
-        "base_url": base_url,
-        "max_pages": max_pages,
         "delay_seconds": delay,
+        "search_profiles": profiles_to_keep,
     }
 
 
@@ -332,9 +453,10 @@ def main() -> None:
 
                 # Log what we're saving
                 logger.info("Saving scraper config...")
-                logger.info("LinkedIn profiles to save: %d", len(linkedin_vals.get("search_profiles", [])))
-                for i, p in enumerate(linkedin_vals.get("search_profiles", [])):
-                    logger.info("  Profile %d: %s", i, p.get("label", "unnamed"))
+                for scraper_name in ("linkedin", "wellfound", "remote_io", "remote_rocketship"):
+                    scraper_data = cast(dict[str, object], new_data[scraper_name])
+                    profiles = cast(list[object], scraper_data.get("search_profiles", []))
+                    logger.info("%s profiles to save: %d", scraper_name, len(profiles))
                 logger.debug("Full config: %s", json.dumps(new_data, indent=2, default=str))
 
                 try:
@@ -343,9 +465,10 @@ def main() -> None:
                     logger.info("Configuration saved successfully to database")
 
                     # Clear session state AFTER successful save
-                    if "linkedin_profiles" in st.session_state:
-                        del st.session_state.linkedin_profiles
-                        logger.debug("Cleared linkedin_profiles from session state")
+                    for key in ("linkedin_profiles", "wellfound_profiles", "rio_profiles", "rrs_profiles"):
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    logger.debug("Cleared profile session state")
 
                     st.success("Configuration saved.")
                     st.rerun()
