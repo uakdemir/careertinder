@@ -12,9 +12,12 @@ from jobhunter.config.schema import (
     LinkedInConfig,
     LinkedInSearchProfile,
     RemoteIoConfig,
+    RemoteIoSearchProfile,
     RemoteRocketshipConfig,
+    RemoteRocketshipSearchProfile,
     SecretsConfig,
     WellfoundConfig,
+    WellfoundSearchProfile,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -22,13 +25,25 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def remote_io_config() -> RemoteIoConfig:
-    return RemoteIoConfig(enabled=True, base_url="https://remote.io/remote-jobs", max_pages=2, delay_seconds=0)
+    return RemoteIoConfig(
+        enabled=True,
+        delay_seconds=0,
+        search_profiles=[
+            RemoteIoSearchProfile(label="Test", url="https://remote.io/remote-jobs", max_pages=2),
+        ],
+    )
 
 
 @pytest.fixture
 def remote_rocketship_config() -> RemoteRocketshipConfig:
     return RemoteRocketshipConfig(
-        enabled=True, base_url="https://www.remoterocketship.com", max_pages=2, delay_seconds=0
+        enabled=True,
+        delay_seconds=0,
+        search_profiles=[
+            RemoteRocketshipSearchProfile(
+                label="Test", url="https://www.remoterocketship.com", max_pages=2
+            ),
+        ],
     )
 
 
@@ -38,8 +53,11 @@ def wellfound_config() -> WellfoundConfig:
         enabled=True,
         apify_actor_id="shahidirfan/wellfound-jobs-scraper",
         max_results=50,
-        search_keyword="software engineer",
-        location_filter="remote",
+        search_profiles=[
+            WellfoundSearchProfile(
+                label="Test", search_keyword="software engineer", location_filter="remote"
+            ),
+        ],
     )
 
 

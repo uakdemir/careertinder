@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,22 +7,84 @@ class ConfigurationError(Exception):
     """Raised when configuration is missing or invalid."""
 
 
+class RemoteIoSearchProfile(BaseModel):
+    """A single Remote.io search URL to scrape."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    label: str
+    url: str
+    max_pages: int = Field(default=5, ge=1, le=50)
+
+
 class RemoteIoConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     enabled: bool = True
-    base_url: str = "https://remote.io/remote-jobs"
-    max_pages: int = 10
     delay_seconds: int = 2
+    search_profiles: list[RemoteIoSearchProfile] = Field(
+        default_factory=lambda: [
+            RemoteIoSearchProfile(label="Default", url="https://remote.io/remote-jobs", max_pages=10)
+        ]
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy(cls, data: dict) -> dict:  # type: ignore[type-arg]
+        if isinstance(data, dict) and "base_url" in data and "search_profiles" not in data:
+            data["search_profiles"] = [{
+                "label": "Default",
+                "url": data.pop("base_url"),
+                "max_pages": data.pop("max_pages", 10),
+            }]
+        return data
+
+
+class RemoteRocketshipSearchProfile(BaseModel):
+    """A single RemoteRocketship search URL to scrape."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    label: str
+    url: str
+    max_pages: int = Field(default=5, ge=1, le=50)
 
 
 class RemoteRocketshipConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     enabled: bool = True
-    base_url: str = "https://www.remoterocketship.com"
-    max_pages: int = 10
     delay_seconds: int = 2
+    search_profiles: list[RemoteRocketshipSearchProfile] = Field(
+        default_factory=lambda: [
+            RemoteRocketshipSearchProfile(
+                label="Default", url="https://www.remoterocketship.com", max_pages=10
+            )
+        ]
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy(cls, data: dict) -> dict:  # type: ignore[type-arg]
+        if isinstance(data, dict) and "base_url" in data and "search_profiles" not in data:
+            data["search_profiles"] = [{
+                "label": "Default",
+                "url": data.pop("base_url"),
+                "max_pages": data.pop("max_pages", 10),
+            }]
+        return data
+
+
+class WellfoundSearchProfile(BaseModel):
+    """A single Wellfound search query for Apify actor."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    label: str
+    search_keyword: str
+    location_filter: str = "remote"
+    source_url: str | None = None
+    weight: int = Field(default=1, ge=1, le=10)
 
 
 class WellfoundConfig(BaseModel):
@@ -31,8 +93,24 @@ class WellfoundConfig(BaseModel):
     enabled: bool = False  # Deferred: all Apify actors require manual cookie/CAPTCHA
     apify_actor_id: str = "shahidirfan/wellfound-jobs-scraper"
     max_results: int = 100
-    search_keyword: str = "software engineer"
-    location_filter: str = "remote"
+    search_profiles: list[WellfoundSearchProfile] = Field(
+        default_factory=lambda: [
+            WellfoundSearchProfile(
+                label="Default", search_keyword="software engineer", location_filter="remote"
+            )
+        ]
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy(cls, data: dict) -> dict:  # type: ignore[type-arg]
+        if isinstance(data, dict) and "search_keyword" in data and "search_profiles" not in data:
+            data["search_profiles"] = [{
+                "label": "Default",
+                "search_keyword": data.pop("search_keyword"),
+                "location_filter": data.pop("location_filter", "remote"),
+            }]
+        return data
 
 
 class LinkedInSearchProfile(BaseModel):
@@ -53,6 +131,7 @@ class LinkedInSearchProfile(BaseModel):
     job_functions: list[str] = Field(default_factory=list)  # LinkedIn codes: it, eng, prjm, etc.
     contract_type: list[str] = Field(default_factory=list)  # Full-time, Part-time, Contract, etc.
     posted_limit: str | None = None  # 24h, week, month
+    source_url: str | None = None  # Original LinkedIn search URL
     weight: int = Field(default=1, ge=1, le=10)
 
 

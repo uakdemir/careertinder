@@ -28,11 +28,14 @@ class TestConfigNewFields:
         assert scraping.timeout_seconds == 600
         assert scraping.linkedin.search_profiles == []
         assert scraping.linkedin.apify_actor_id == "valig/linkedin-jobs-scraper"
-        assert scraping.wellfound.search_keyword == "software engineer"
-        assert scraping.wellfound.location_filter == "remote"
+        assert len(scraping.wellfound.search_profiles) == 1
+        assert scraping.wellfound.search_profiles[0].search_keyword == "software engineer"
+        assert scraping.wellfound.search_profiles[0].location_filter == "remote"
         assert scraping.wellfound.enabled is False  # Deferred
 
     def test_config_new_fields_explicit(self) -> None:
+        from jobhunter.config.schema import WellfoundSearchProfile
+
         config = AppConfig(
             scraping=ScrapingConfig(
                 timeout_seconds=120,
@@ -46,16 +49,21 @@ class TestConfigNewFields:
                     ],
                 ),
                 wellfound=WellfoundConfig(
-                    search_keyword="platform engineer",
-                    location_filter="europe",
+                    search_profiles=[
+                        WellfoundSearchProfile(
+                            label="Platform",
+                            search_keyword="platform engineer",
+                            location_filter="europe",
+                        ),
+                    ],
                 ),
             )
         )
         assert config.scraping.timeout_seconds == 120
         assert len(config.scraping.linkedin.search_profiles) == 1
         assert config.scraping.linkedin.search_profiles[0].job_titles == ["Software Architect"]
-        assert config.scraping.wellfound.search_keyword == "platform engineer"
-        assert config.scraping.wellfound.location_filter == "europe"
+        assert config.scraping.wellfound.search_profiles[0].search_keyword == "platform engineer"
+        assert config.scraping.wellfound.search_profiles[0].location_filter == "europe"
 
     def test_timeout_seconds_in_config(self, tmp_path) -> None:
         config_path = tmp_path / "config.yaml"
@@ -69,12 +77,22 @@ class TestConfigNewFields:
         assert config.scraping.timeout_seconds == 30
 
     def test_per_scraper_config_fields(self) -> None:
-        rio = RemoteIoConfig(max_pages=3, delay_seconds=5)
-        assert rio.max_pages == 3
+        from jobhunter.config.schema import RemoteIoSearchProfile, RemoteRocketshipSearchProfile
+
+        rio = RemoteIoConfig(
+            delay_seconds=5,
+            search_profiles=[RemoteIoSearchProfile(label="Test", url="https://remote.io", max_pages=3)],
+        )
+        assert rio.search_profiles[0].max_pages == 3
         assert rio.delay_seconds == 5
 
-        rrs = RemoteRocketshipConfig(max_pages=2, delay_seconds=4)
-        assert rrs.max_pages == 2
+        rrs = RemoteRocketshipConfig(
+            delay_seconds=4,
+            search_profiles=[
+                RemoteRocketshipSearchProfile(label="Test", url="https://remoterocketship.com", max_pages=2)
+            ],
+        )
+        assert rrs.search_profiles[0].max_pages == 2
         assert rrs.delay_seconds == 4
 
 

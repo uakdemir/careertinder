@@ -26,8 +26,8 @@ def sample_config_dict():
     return {
         "scraping": {
             "remote_io": {
-                "enabled": True, "base_url": "https://remote.io/remote-jobs",
-                "max_pages": 5, "delay_seconds": 1,
+                "enabled": True, "delay_seconds": 1,
+                "search_profiles": [{"label": "Test", "url": "https://remote.io/remote-jobs", "max_pages": 5}],
             },
             "remote_rocketship": {"enabled": False},
             "wellfound": {"enabled": True},
