@@ -8,6 +8,7 @@ Revises: e5f6a7b8c9d0
 Create Date: 2026-03-09
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "f6a7b8c9d0e1"
@@ -17,7 +18,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("ck_raw_job_postings_source", "raw_job_postings", type_="check")
+    # Constraint may not exist if the DB was created without it; drop only if present.
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'ck_raw_job_postings_source' "
+            "AND conrelid = 'raw_job_postings'::regclass"
+        )
+    )
+    if result.scalar():
+        op.drop_constraint("ck_raw_job_postings_source", "raw_job_postings", type_="check")
     op.create_check_constraint(
         "ck_raw_job_postings_source",
         "raw_job_postings",
