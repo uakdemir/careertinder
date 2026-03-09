@@ -77,6 +77,25 @@ class TestParseLinkedInUrl:
         assert result is not None
         assert result.job_titles == []
 
+    def test_source_url_stored(self) -> None:
+        """parse_linkedin_url() stores the original URL as source_url."""
+        url = "https://www.linkedin.com/jobs/search/?keywords=architect&f_WT=2"
+        result = parse_linkedin_url(url)
+        assert result is not None
+        assert result.source_url == url
+
+    def test_source_url_none_when_not_parsed(self) -> None:
+        """Non-LinkedIn URL returns None (no profile at all)."""
+        result = parse_linkedin_url("https://example.com")
+        assert result is None
+
+    def test_source_url_none_default_on_manual(self) -> None:
+        """Manually created profiles without source_url get None."""
+        from jobhunter.config.schema import LinkedInSearchProfile
+
+        profile = LinkedInSearchProfile(label="Manual", job_titles=["Eng"])
+        assert profile.source_url is None
+
 
 class TestBuildLinkedInUrl:
     def test_roundtrip_basic(self) -> None:
@@ -98,6 +117,24 @@ class TestBuildLinkedInUrl:
             posted_limit="week",
         )
         url = build_linkedin_url(profile)
-        assert "keywords=VP Engineering" in url
-        assert "location=New York" in url
+        assert "keywords=VP+Engineering" in url
+        assert "location=New+York" in url
         assert "f_TPR=r604800" in url
+
+    def test_roundtrip_with_spaces_and_contract_type(self) -> None:
+        """parse → build → parse preserves fields including spaces and contract_type."""
+        url = "https://www.linkedin.com/jobs/search/?keywords=Software+Architect&location=New+York&f_WT=2&f_E=4,5&f_JT=F,C"
+        profile1 = parse_linkedin_url(url)
+        assert profile1 is not None
+        assert profile1.contract_type == ["Full-time", "Contract"]
+
+        rebuilt = build_linkedin_url(profile1)
+        assert "f_JT=F%2CC" in rebuilt  # urlencode encodes comma as %2C
+        assert "keywords=Software+Architect" in rebuilt
+
+        # Parse rebuilt URL
+        profile2 = parse_linkedin_url(rebuilt)
+        assert profile2 is not None
+        assert profile2.job_titles == profile1.job_titles
+        assert profile2.contract_type == profile1.contract_type
+        assert profile2.experience_level == profile1.experience_level

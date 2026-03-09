@@ -174,7 +174,7 @@ class TestLinkedInApifyScraper:
             LinkedInSearchProfile(label="A", job_titles=["Eng"], weight=1),
         ]
         budget = LinkedInApifyScraper._allocate_budget(profiles, 100)
-        assert budget["A"] == 100
+        assert budget == [100]
 
     def test_budget_allocation_equal_weights(self) -> None:
         profiles = [
@@ -182,8 +182,7 @@ class TestLinkedInApifyScraper:
             LinkedInSearchProfile(label="B", job_titles=["Arch"], weight=1),
         ]
         budget = LinkedInApifyScraper._allocate_budget(profiles, 100)
-        assert budget["A"] == 50
-        assert budget["B"] == 50
+        assert budget == [50, 50]
 
     def test_budget_allocation_weighted(self) -> None:
         profiles = [
@@ -191,16 +190,17 @@ class TestLinkedInApifyScraper:
             LinkedInSearchProfile(label="Low", job_titles=["Arch"], weight=1),
         ]
         budget = LinkedInApifyScraper._allocate_budget(profiles, 100)
-        assert budget["High"] == 75
-        assert budget["Low"] == 25
+        assert budget == [75, 25]
 
-    def test_budget_allocation_minimum_one(self) -> None:
+    def test_budget_allocation_invariant(self) -> None:
+        """sum(budgets) <= total_budget invariant must hold."""
         profiles = [
             LinkedInSearchProfile(label="A", job_titles=["Eng"], weight=1),
             LinkedInSearchProfile(label="B", job_titles=["Arch"], weight=10),
         ]
         budget = LinkedInApifyScraper._allocate_budget(profiles, 10)
-        assert budget["A"] >= 1  # At least 1
+        assert sum(budget) <= 10
+        assert len(budget) == 2
 
     def test_extract_job_id(self) -> None:
         assert LinkedInApifyScraper._extract_job_id(
@@ -354,3 +354,18 @@ class TestLinkedInApifyScraper:
 
         assert len(results) == 1
         assert results[0].title == "Good Job"
+
+    def test_allocate_budget_duplicate_labels(self) -> None:
+        """Two profiles with same label get independent allocations."""
+        profiles = [
+            LinkedInSearchProfile(label="Same", job_titles=["Eng"], weight=1),
+            LinkedInSearchProfile(label="Same", job_titles=["Arch"], weight=1),
+        ]
+        budget = LinkedInApifyScraper._allocate_budget(profiles, 100)
+        assert budget == [50, 50]  # Index-based, not label-keyed
+
+    def test_dataset_fetch_uses_profile_budget(self, linkedin_config, secrets_with_apify) -> None:
+        """_SingleProfileScraper._max_results equals per-profile allocation, not total."""
+        profile = linkedin_config.search_profiles[0]
+        scraper = _SingleProfileScraper(linkedin_config, secrets_with_apify, profile, max_items=25)
+        assert scraper._max_results == 25  # Not 50 (the total config.max_results)

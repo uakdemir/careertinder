@@ -7,7 +7,7 @@ Compatible with valig/linkedin-jobs-scraper actor.
 """
 
 import logging
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from jobhunter.config.schema import LinkedInSearchProfile
 
@@ -144,48 +144,68 @@ def parse_linkedin_url(url: str, label: str = "") -> LinkedInSearchProfile | Non
             job_functions=job_functions,
             contract_type=contract_type,
             posted_limit=posted_limit,
+            source_url=url,
         )
     except Exception:
         logger.warning("Failed to parse LinkedIn URL: %s", url, exc_info=True)
         return None
 
 
+_CONTRACT_TYPE_REVERSE: dict[str, str] = {
+    "Full-time": "F",
+    "Part-time": "P",
+    "Contract": "C",
+    "Temporary": "T",
+    "Internship": "I",
+}
+
+
 def build_linkedin_url(profile: LinkedInSearchProfile) -> str:
-    """Build a LinkedIn search URL from a structured profile (for display/reference)."""
-    params: list[str] = []
+    """Build a LinkedIn search URL from a structured profile (for display/reference).
+
+    Uses urllib.parse.urlencode for proper encoding (spaces, special chars).
+    Includes f_JT reverse-mapping for contract_type.
+    """
+    params: dict[str, str] = {}
 
     if profile.job_titles:
-        params.append(f"keywords={profile.job_titles[0]}")
+        params["keywords"] = profile.job_titles[0]
 
     if profile.locations:
-        params.append(f"location={profile.locations[0]}")
+        params["location"] = profile.locations[0]
 
     if profile.geo_id:
-        params.append(f"geoId={profile.geo_id}")
+        params["geoId"] = profile.geo_id
 
     # Reverse-map workplace type
     wt_reverse = {v: k for k, v in _WORKPLACE_MAP.items()}
     wt_codes = [wt_reverse[wt] for wt in profile.workplace_type if wt in wt_reverse]
     if wt_codes:
-        params.append(f"f_WT={','.join(wt_codes)}")
+        params["f_WT"] = ",".join(wt_codes)
 
     # Reverse-map experience level
     exp_reverse = {v: k for k, v in _EXPERIENCE_MAP.items()}
     exp_codes = [exp_reverse[e] for e in profile.experience_level if e in exp_reverse]
     if exp_codes:
-        params.append(f"f_E={','.join(exp_codes)}")
+        params["f_E"] = ",".join(exp_codes)
 
     # Job functions (direct codes)
     if profile.job_functions:
-        params.append(f"f_F={','.join(profile.job_functions)}")
+        params["f_F"] = ",".join(profile.job_functions)
+
+    # Reverse-map contract type to f_JT
+    if profile.contract_type:
+        jt_codes = [_CONTRACT_TYPE_REVERSE[ct] for ct in profile.contract_type if ct in _CONTRACT_TYPE_REVERSE]
+        if jt_codes:
+            params["f_JT"] = ",".join(jt_codes)
 
     # Reverse-map posted limit
     tpr_reverse = {v: k for k, v in _TIME_POSTED_MAP.items()}
     if profile.posted_limit and profile.posted_limit in tpr_reverse:
-        params.append(f"f_TPR={tpr_reverse[profile.posted_limit]}")
+        params["f_TPR"] = tpr_reverse[profile.posted_limit]
 
-    params.append("sortBy=DD")
-    return "https://www.linkedin.com/jobs/search/?" + "&".join(params)
+    params["sortBy"] = "DD"
+    return "https://www.linkedin.com/jobs/search/?" + urlencode(params)
 
 
 def get_job_function_name(code: str) -> str:

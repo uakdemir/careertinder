@@ -67,6 +67,8 @@ class _SingleProfileScraper(ApifyBaseScraper):
         super().__init__(config, secrets)
         self._profile = profile
         self._max_items = max_items
+        # Override inherited total budget with per-profile allocation
+        self._max_results = max_items
 
     @property
     def scraper_name(self) -> str:
@@ -237,12 +239,12 @@ class LinkedInApifyScraper(BaseScraper):
             self._logger.warning("No search profiles configured for LinkedIn")
             return []
 
-        budget_map = self._allocate_budget(profiles, self._linkedin_config.max_results)
+        budgets = self._allocate_budget(profiles, self._linkedin_config.max_results)
         seen_ids: set[str] = set()
         all_results: list[RawJobData] = []
 
-        for profile in profiles:
-            max_items = budget_map[profile.label]
+        for i, profile in enumerate(profiles):
+            max_items = budgets[i]
             self._logger.info(
                 "Running profile '%s' (budget=%d)", profile.label, max_items
             )
@@ -298,17 +300,29 @@ class LinkedInApifyScraper(BaseScraper):
     @staticmethod
     def _allocate_budget(
         profiles: list[LinkedInSearchProfile], total_budget: int
-    ) -> dict[str, int]:
-        """Distribute max_results across profiles proportionally by weight.
+    ) -> list[int]:
+        """Distribute max_results across profiles by weight (index-parallel).
 
-        Each profile gets at least 1 result if total_budget >= len(profiles).
+        Invariant: sum(result) <= total_budget.
+        Algorithm: floor proportional shares, then distribute remainder
+        one-at-a-time to profiles with largest fractional part.
         """
+        if not profiles:
+            return []
         total_weight = sum(p.weight for p in profiles)
-        budget: dict[str, int] = {}
-        for profile in profiles:
-            share = max(1, round(total_budget * profile.weight / total_weight))
-            budget[profile.label] = share
-        return budget
+        if total_weight == 0:
+            return [0] * len(profiles)
+
+        raw = [(total_budget * p.weight / total_weight) for p in profiles]
+        floors = [int(r) for r in raw]
+        remainders = [(r - f, i) for i, (r, f) in enumerate(zip(raw, floors, strict=True))]
+
+        leftover = total_budget - sum(floors)
+        remainders.sort(key=lambda x: x[0], reverse=True)
+        for j in range(leftover):
+            floors[remainders[j][1]] += 1
+
+        return floors
 
     @staticmethod
     def _extract_job_id(url: str) -> str | None:
