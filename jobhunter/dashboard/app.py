@@ -330,6 +330,7 @@ pg = st.navigation(
             st.Page("pages/3_operations.py", title="Operations", icon=":material/play_circle:"),
             st.Page("pages/12_ready_to_apply.py", title="Ready to Apply", icon=":material/send:"),
             st.Page("pages/13_applied_jobs.py", title="Applied Jobs", icon=":material/check_circle:"),
+            st.Page("pages/14_manual_entry.py", title="Add Job", icon=":material/add_circle:"),
         ],
         "Configure": [
             st.Page("pages/4_resume_management.py", title="Resumes", icon=":material/description:"),

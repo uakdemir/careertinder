@@ -28,7 +28,7 @@ class RawJobPosting(Base):
     raw_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(
         String,
-        CheckConstraint("source IN ('remote_io', 'remote_rocketship', 'wellfound', 'linkedin')"),
+        CheckConstraint("source IN ('remote_io', 'remote_rocketship', 'wellfound', 'linkedin', 'manual')"),
         nullable=False,
     )
     source_url: Mapped[str] = mapped_column(String, nullable=False)

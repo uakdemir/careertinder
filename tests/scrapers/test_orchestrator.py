@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from jobhunter.config.schema import AppConfig, ScrapingConfig, SecretsConfig
 from jobhunter.db.models import Base, RawJobPosting, ScraperRun
 from jobhunter.scrapers.base import BaseScraper, RawJobData
-from jobhunter.scrapers.exceptions import ScraperError
+from jobhunter.scrapers.exceptions import ScraperError, ScraperStructureError
 from jobhunter.scrapers.orchestrator import ScraperOrchestrator
 
 
@@ -245,3 +245,24 @@ class TestScraperOrchestrator:
         assert result.results[0].status == "timeout"
         assert result.results[0].error_message is not None
         assert "timeout" in result.results[0].error_message.lower()
+
+    @pytest.mark.asyncio
+    async def test_structure_error_sets_blocked_status(self, config, secrets, orch_session) -> None:
+        """ScraperStructureError → run_record.status = 'blocked'."""
+        scraper = FakeScraper(
+            "remote_io",
+            error=ScraperStructureError("remote_io", "No job cards found on page 1"),
+        )
+
+        orchestrator = ScraperOrchestrator(config, secrets, orch_session)
+        with patch.object(orchestrator, "_build_enabled_scrapers", return_value=[scraper]):
+            result = await orchestrator.run_all()
+
+        assert result.results[0].status == "blocked"
+        assert "No job cards" in (result.results[0].error_message or "")
+
+        # Verify DS9 record
+        runs = orch_session.query(ScraperRun).all()
+        assert len(runs) == 1
+        assert runs[0].status == "blocked"
+        assert runs[0].error_message is not None

@@ -17,6 +17,7 @@ SOURCE_ABBREV: dict[str, str] = {
     "wellfound": "WF",
     "remote_io": "RIO",
     "remote_rocketship": "RRS",
+    "manual": "MAN",
 }
 
 

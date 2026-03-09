@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from jobhunter.config.schema import AppConfig, SecretsConfig
 from jobhunter.db.models import RawJobPosting, ScraperRun
 from jobhunter.scrapers.base import BaseScraper, RawJobData
-from jobhunter.scrapers.exceptions import ScraperError
+from jobhunter.scrapers.exceptions import ScraperError, ScraperStructureError
 from jobhunter.scrapers.linkedin_apify import LinkedInApifyScraper
 from jobhunter.scrapers.remote_io import RemoteIoScraper
 from jobhunter.scrapers.remoterocketship import RemoteRocketshipScraper
@@ -106,6 +106,12 @@ class ScraperOrchestrator:
                 pages_scraped=0,
                 duration_seconds=(datetime.now(UTC) - start_time).total_seconds(),
             )
+
+        except ScraperStructureError as e:
+            self._logger.error("Scraper %s: structure change detected: %s", scraper.scraper_name, e)
+            run_record.status = "blocked"
+            run_record.error_message = str(e)
+            result = self._error_result(scraper.scraper_name, "blocked", str(e), start_time)
 
         except TimeoutError:
             self._logger.error("Scraper %s timed out", scraper.scraper_name)

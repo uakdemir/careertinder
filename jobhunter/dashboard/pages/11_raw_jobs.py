@@ -23,7 +23,7 @@ _DATE_FILTERS: dict[str, timedelta | None] = {
     "Last 30 days": timedelta(days=30),
 }
 
-_SOURCES = ["All", "linkedin", "wellfound", "remote_io", "remote_rocketship"]
+_SOURCES = ["All", "linkedin", "wellfound", "remote_io", "remote_rocketship", "manual"]
 
 
 def _get_page_size() -> int:
