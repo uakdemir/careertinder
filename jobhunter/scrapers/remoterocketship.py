@@ -3,22 +3,32 @@ import asyncio
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
+from jobhunter.config.schema import RemoteRocketshipSearchProfile
 from jobhunter.scrapers.base import BaseScraper, RawJobData
-from jobhunter.scrapers.exceptions import ScraperTimeoutError
+from jobhunter.scrapers.exceptions import ScraperStructureError, ScraperTimeoutError
 from jobhunter.scrapers.rate_limiter import RateLimiter
 
 
 class RemoteRocketshipScraper(BaseScraper):
-    """C2b — RemoteRocketship scraper using Playwright browser automation."""
+    """C2b — RemoteRocketship scraper using Playwright browser automation.
+
+    Supports multi-profile search: each profile has its own URL and max_pages.
+    Single browser instance shared across all profiles.
+    """
 
     @property
     def scraper_name(self) -> str:
         return "remote_rocketship"
 
     async def scrape(self) -> list[RawJobData]:
-        """Scrape RemoteRocketship with infinite-scroll handling."""
-        results: list[RawJobData] = []
-        rate_limiter = RateLimiter(self._config.delay_seconds)  # type: ignore[attr-defined]
+        """Scrape all search profiles with a shared browser instance."""
+        profiles = self._config.search_profiles  # type: ignore[attr-defined]
+        if not profiles:
+            self._logger.warning("No search profiles configured for RemoteRocketship")
+            return []
+
+        all_results: list[RawJobData] = []
+        seen_urls: set[str] = set()
 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
@@ -26,19 +36,52 @@ class RemoteRocketshipScraper(BaseScraper):
             page = await context.new_page()
 
             try:
-                await self._navigate_with_retry(page, self._config.base_url)  # type: ignore[attr-defined]
-                await self._load_all_listings(page, rate_limiter)
-                cards = await self._extract_job_cards(page)
-
-                for card in cards:
-                    await rate_limiter.wait()
-                    detail = await self._scrape_detail_page(page, card)
-                    if detail:
-                        results.append(detail)
+                for profile in profiles:
+                    try:
+                        profile_results = await self._scrape_profile(page, profile)
+                        for job in profile_results:
+                            if job.source_url not in seen_urls:
+                                seen_urls.add(job.source_url)
+                                all_results.append(job)
+                            else:
+                                self._logger.debug(
+                                    "Dedup: %s (profile: %s)", job.source_url, profile.label
+                                )
+                    except Exception as e:
+                        self._logger.error("Profile '%s' failed: %s", profile.label, e)
             finally:
                 await browser.close()
 
-        self._logger.info("RemoteRocketship scrape complete: %d jobs found", len(results))
+        self._logger.info("RemoteRocketship scrape complete: %d jobs found", len(all_results))
+        return all_results
+
+    async def _scrape_profile(
+        self, page: Page, profile: RemoteRocketshipSearchProfile
+    ) -> list[RawJobData]:
+        """Scrape a single search profile using a shared browser page."""
+        results: list[RawJobData] = []
+        rate_limiter = RateLimiter(self._config.delay_seconds)  # type: ignore[attr-defined]
+
+        await self._navigate_with_retry(page, profile.url)
+        await self._load_all_listings(page, rate_limiter, profile.max_pages)
+        cards = await self._extract_job_cards(page)
+
+        if not cards:
+            raise ScraperStructureError(
+                self.scraper_name,
+                f"No job cards found for profile '{profile.label}'. "
+                "CSS selectors may need updating.",
+            )
+
+        for card in cards:
+            await rate_limiter.wait()
+            detail = await self._scrape_detail_page(page, card)
+            if detail:
+                results.append(detail)
+
+        self._logger.info(
+            "Profile '%s': %d jobs found", profile.label, len(results)
+        )
         return results
 
     async def _create_context(self, browser: Browser) -> BrowserContext:
@@ -63,7 +106,9 @@ class RemoteRocketshipScraper(BaseScraper):
                 self._logger.warning("Timeout %s (attempt %d/%d)", url, attempt + 1, max_retries + 1)
                 await asyncio.sleep(2**attempt)
 
-    async def _load_all_listings(self, page: Page, rate_limiter: RateLimiter) -> None:
+    async def _load_all_listings(
+        self, page: Page, rate_limiter: RateLimiter, max_pages: int
+    ) -> None:
         """Scroll to load all job listings (infinite scroll / load-more button).
 
         Stops when:
@@ -71,7 +116,7 @@ class RemoteRocketshipScraper(BaseScraper):
         - No new items appear after scrolling
         - Load-more button disappears
         """
-        max_items: int = self._config.max_pages * 20  # type: ignore[attr-defined]
+        max_items: int = max_pages * 20
         prev_count = 0
         no_change_rounds = 0
 
@@ -170,14 +215,15 @@ class RemoteRocketshipScraper(BaseScraper):
 
     async def health_check(self) -> bool:
         """Check if RemoteRocketship is reachable."""
+        profiles = self._config.search_profiles  # type: ignore[attr-defined]
+        if not profiles:
+            return False
         browser = None
         try:
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch(headless=True)
                 page = await browser.new_page()
-                await page.goto(
-                    self._config.base_url, timeout=15000  # type: ignore[attr-defined]
-                )
+                await page.goto(profiles[0].url, timeout=15000)
                 title = await page.title()
                 return bool(title)
         except Exception:

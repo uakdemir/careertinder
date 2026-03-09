@@ -1,9 +1,10 @@
-"""Tests for D6: RemoteRocketship Playwright scraper."""
+"""Tests for RemoteRocketship Playwright scraper (multi-profile)."""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from jobhunter.config.schema import RemoteRocketshipConfig, RemoteRocketshipSearchProfile
 from jobhunter.scrapers.exceptions import ScraperTimeoutError
 from jobhunter.scrapers.rate_limiter import RateLimiter
 from jobhunter.scrapers.remoterocketship import RemoteRocketshipScraper
@@ -26,7 +27,7 @@ class TestRemoteRocketshipScraper:
 
         rate_limiter = RateLimiter(0)
         with patch("jobhunter.scrapers.remoterocketship.RateLimiter", return_value=rate_limiter):
-            await scraper._load_all_listings(mock_page, rate_limiter)
+            await scraper._load_all_listings(mock_page, rate_limiter, max_pages=2)
 
         # Should have scrolled and checked 3 times (no_change_rounds threshold)
         assert mock_page.evaluate.call_count >= 3
@@ -47,7 +48,7 @@ class TestRemoteRocketshipScraper:
         mock_page.evaluate = AsyncMock(side_effect=call_results)
 
         rate_limiter = RateLimiter(0)
-        await scraper._load_all_listings(mock_page, rate_limiter)
+        await scraper._load_all_listings(mock_page, rate_limiter, max_pages=2)
 
     @pytest.mark.asyncio
     async def test_load_all_listings_clicks_load_more(self, scraper) -> None:
@@ -71,7 +72,7 @@ class TestRemoteRocketshipScraper:
         mock_page.evaluate = AsyncMock(side_effect=call_results)
 
         rate_limiter = RateLimiter(0)
-        await scraper._load_all_listings(mock_page, rate_limiter)
+        await scraper._load_all_listings(mock_page, rate_limiter, max_pages=2)
         load_more_btn.click.assert_called_once()
 
     @pytest.mark.asyncio
@@ -129,3 +130,99 @@ class TestRemoteRocketshipScraper:
         tags = ["Senior", "AWS"]
         result = f"{location} [{', '.join(tags)}]".strip()
         assert result == "[Senior, AWS]"
+
+    @pytest.mark.asyncio
+    async def test_scrape_no_profiles(self, secrets_no_apify) -> None:
+        """Empty profiles list returns empty results."""
+        config = RemoteRocketshipConfig(enabled=True, delay_seconds=0, search_profiles=[])
+        scraper = RemoteRocketshipScraper(config, secrets_no_apify)
+        results = await scraper.scrape()
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_structure_error_empty_cards(self, scraper, caplog) -> None:
+        """Empty cards after loading logs error but continues (failure isolation)."""
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        mock_browser = AsyncMock()
+        mock_browser.close = AsyncMock()
+
+        with (
+            patch.object(scraper, "_create_context", new_callable=AsyncMock, return_value=mock_context),
+            patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
+            patch.object(scraper, "_load_all_listings", new_callable=AsyncMock),
+            patch.object(scraper, "_extract_job_cards", new_callable=AsyncMock, return_value=[]),
+            patch("jobhunter.scrapers.remoterocketship.async_playwright") as mock_pw,
+            patch("jobhunter.scrapers.remoterocketship.RateLimiter") as mock_rl,
+        ):
+            mock_chromium = AsyncMock(launch=AsyncMock(return_value=mock_browser))
+            mock_pw.return_value.__aenter__ = AsyncMock(
+                return_value=AsyncMock(chromium=mock_chromium)
+            )
+            mock_pw.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_rl.return_value.wait = AsyncMock()
+
+            results = await scraper.scrape()
+            assert results == []
+            assert "No job cards found" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_multi_profile_dedup(self, secrets_no_apify) -> None:
+        """Same job from two profiles is deduplicated by source_url."""
+        from jobhunter.scrapers.base import RawJobData
+
+        profiles = [
+            RemoteRocketshipSearchProfile(label="P1", url="https://rrs.com/python", max_pages=1),
+            RemoteRocketshipSearchProfile(label="P2", url="https://rrs.com/devops", max_pages=1),
+        ]
+        config = RemoteRocketshipConfig(enabled=True, delay_seconds=0, search_profiles=profiles)
+        scraper = RemoteRocketshipScraper(config, secrets_no_apify)
+
+        shared_job = RawJobData(
+            source="remote_rocketship",
+            source_url="https://rrs.com/job/shared",
+            title="Shared",
+            company="Co",
+            description="Shared job",
+        )
+        unique_job = RawJobData(
+            source="remote_rocketship",
+            source_url="https://rrs.com/job/unique",
+            title="Unique",
+            company="Co2",
+            description="Only in P2",
+        )
+
+        call_count = 0
+
+        async def mock_scrape_profile(page, profile):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [shared_job]
+            return [shared_job, unique_job]
+
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        mock_browser = AsyncMock()
+        mock_browser.close = AsyncMock()
+
+        with (
+            patch.object(scraper, "_create_context", new_callable=AsyncMock, return_value=mock_context),
+            patch.object(scraper, "_scrape_profile", side_effect=mock_scrape_profile),
+            patch("jobhunter.scrapers.remoterocketship.async_playwright") as mock_pw,
+        ):
+            mock_chromium = AsyncMock(launch=AsyncMock(return_value=mock_browser))
+            mock_pw.return_value.__aenter__ = AsyncMock(
+                return_value=AsyncMock(chromium=mock_chromium)
+            )
+            mock_pw.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            results = await scraper.scrape()
+
+        assert len(results) == 2
+        urls = {r.source_url for r in results}
+        assert "https://rrs.com/job/shared" in urls
+        assert "https://rrs.com/job/unique" in urls
