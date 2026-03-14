@@ -17,6 +17,7 @@ import logging
 from pydantic import BaseModel
 
 from jobhunter.config.schema import LinkedInConfig, LinkedInSearchProfile, SecretsConfig
+from jobhunter.scrapers.apify_adapters import LinkedInItemAdapter
 from jobhunter.scrapers.apify_base import ApifyBaseScraper
 from jobhunter.scrapers.base import BaseScraper, RawJobData
 from jobhunter.scrapers.exceptions import ScraperError
@@ -66,6 +67,7 @@ class _SingleProfileScraper(ApifyBaseScraper):
     ) -> None:
         super().__init__(config, secrets)
         self._profile = profile
+        self._adapter = LinkedInItemAdapter()
         self._max_items = max_items
         # Override inherited total budget with per-profile allocation
         self._max_results = max_items
@@ -166,54 +168,8 @@ class _SingleProfileScraper(ApifyBaseScraper):
         return params
 
     def _parse_item(self, item: dict) -> RawJobData | None:
-        """Parse a valig result into RawJobData.
-
-        Valig output schema:
-          - id, url, title, location (strings)
-          - companyName, companyUrl (strings)
-          - recruiterName, recruiterUrl (strings)
-          - experienceLevel, contractType, workType, sector (strings)
-          - salary (string or null)
-          - applyType, applyUrl (strings)
-          - postedTimeAgo, postedDate, applicationsCount
-          - description, descriptionHtml (strings)
-        """
-        title = item.get("title")
-        company = item.get("companyName")
-        if not title or not company:
-            self._logger.warning(
-                "Skipping item with missing title/company: %s", item.get("id")
-            )
-            return None
-
-        source_url = (item.get("url") or "").strip()
-        if not source_url:
-            self._logger.warning(
-                "Skipping LinkedIn item with missing URL: %s", item.get("id")
-            )
-            return None
-
-        # Extract location (valig returns it as a direct string)
-        location_raw = item.get("location")
-
-        # Extract salary (valig returns it as a direct string or null)
-        salary_raw = item.get("salary")
-
-        # Prefer plain text description, fall back to HTML
-        description = item.get("description") or item.get("descriptionHtml") or ""
-
-        return RawJobData(
-            source="linkedin",
-            source_url=source_url,
-            title=title,
-            company=company,
-            description=description,
-            salary_raw=salary_raw,
-            location_raw=location_raw,
-            requirements=None,
-            posted_date_raw=item.get("postedDate") or item.get("postedTimeAgo"),
-            raw_html=item.get("descriptionHtml"),
-        )
+        """Delegate to LinkedInItemAdapter for field mapping."""
+        return self._adapter.to_raw_job(item)
 
 
 class LinkedInApifyScraper(BaseScraper):

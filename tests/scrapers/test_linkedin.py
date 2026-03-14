@@ -1,4 +1,4 @@
-"""Tests for LinkedIn valig scraper (multi-profile, structured queries)."""
+"""Tests for LinkedIn valig scraper (adapter delegation, multi-profile, structured queries)."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -61,6 +61,19 @@ class TestSingleProfileScraper:
         scraper = _SingleProfileScraper(linkedin_config, secrets_with_apify, profile, max_items=10)
         actor_input = scraper._build_actor_input()
         assert actor_input["title"] == "Engineering Manager OR Director of Engineering"
+
+    def test_parse_item_delegates_to_adapter(self, scraper) -> None:
+        """_parse_item delegates to LinkedInItemAdapter.to_raw_job."""
+        item = {
+            "title": "Engineer",
+            "companyName": "Co",
+            "url": "https://www.linkedin.com/jobs/view/123",
+            "description": "Build things.",
+        }
+        result = scraper._parse_item(item)
+        assert result is not None
+        assert result.source == "linkedin"
+        assert result.title == "Engineer"
 
     def test_parse_item_complete(self, scraper) -> None:
         """Test parsing valig output format."""

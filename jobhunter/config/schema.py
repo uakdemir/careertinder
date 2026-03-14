@@ -83,6 +83,7 @@ class WellfoundSearchProfile(BaseModel):
     label: str
     search_keyword: str
     location_filter: str = "remote"
+    start_url: str | None = None
     source_url: str | None = None
     weight: int = Field(default=1, ge=1, le=10)
 

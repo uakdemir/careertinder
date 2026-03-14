@@ -13,6 +13,7 @@ import logging
 from pydantic import BaseModel
 
 from jobhunter.config.schema import SecretsConfig, WellfoundConfig, WellfoundSearchProfile
+from jobhunter.scrapers.apify_adapters import WellfoundItemAdapter
 from jobhunter.scrapers.apify_base import ApifyBaseScraper
 from jobhunter.scrapers.base import BaseScraper, RawJobData
 from jobhunter.scrapers.exceptions import ScraperError
@@ -33,6 +34,7 @@ class _SingleWellfoundScraper(ApifyBaseScraper):
         max_results: int,
     ) -> None:
         self._profile = profile
+        self._adapter = WellfoundItemAdapter()
         super().__init__(config, secrets)
         # Override inherited total budget with per-profile allocation
         self._max_results = max_results
@@ -42,60 +44,24 @@ class _SingleWellfoundScraper(ApifyBaseScraper):
         return "wellfound"
 
     def _build_actor_input(self) -> dict:
-        """Build input for shahidirfan/wellfound-jobs-scraper actor."""
-        return {
+        """Build input for shahidirfan/wellfound-jobs-scraper actor.
+
+        The actor requires USA residential proxies to extract data from Wellfound.
+        """
+        actor_input: dict = {
             "keyword": self._profile.search_keyword,
-            "location": self._profile.location_filter,
-            "maxItems": self._max_results,
+            "startUrl": self._profile.start_url or "https://wellfound.com/jobs",
+            "results_wanted": self._max_results,
+            "proxyConfiguration": {
+                "useApifyProxy": True,
+                "apifyProxyGroups": ["RESIDENTIAL"],
+            },
         }
+        return actor_input
 
     def _parse_item(self, item: dict) -> RawJobData | None:
-        """Parse a Wellfound Apify result into RawJobData.
-
-        Wellfound provides startup-specific data (funding stage, team size)
-        which we capture in the description for downstream extraction in M2.
-        """
-        title = item.get("title") or item.get("jobTitle")
-        company = item.get("companyName") or item.get("company")
-        if not title or not company:
-            self._logger.warning("Skipping Wellfound item with missing title/company")
-            return None
-
-        source_url = (item.get("url") or "").strip()
-        if not source_url:
-            self._logger.warning("Skipping Wellfound item with missing URL")
-            return None
-
-        # Build enriched description with startup metadata
-        description_parts = [item.get("description", "")]
-        startup_meta = self._extract_startup_metadata(item)
-        if startup_meta:
-            description_parts.append(f"\n\n--- Startup Info ---\n{startup_meta}")
-
-        return RawJobData(
-            source="wellfound",
-            source_url=source_url,
-            title=title,
-            company=company,
-            description="\n".join(description_parts),
-            salary_raw=item.get("salary") or item.get("compensation"),
-            location_raw=item.get("location"),
-            requirements=item.get("requirements"),
-            posted_date_raw=item.get("postedAt"),
-        )
-
-    def _extract_startup_metadata(self, item: dict) -> str | None:
-        """Extract and format Wellfound startup-specific fields."""
-        parts: list[str] = []
-        if stage := item.get("companyStage") or item.get("fundingStage"):
-            parts.append(f"Funding stage: {stage}")
-        if size := item.get("companySize") or item.get("teamSize"):
-            parts.append(f"Team size: {size}")
-        if tech := item.get("techStack"):
-            if isinstance(tech, list):
-                tech = ", ".join(tech)
-            parts.append(f"Tech stack: {tech}")
-        return "\n".join(parts) if parts else None
+        """Delegate to WellfoundItemAdapter for field mapping."""
+        return self._adapter.to_raw_job(item)
 
 
 class WellfoundApifyScraper(BaseScraper):
