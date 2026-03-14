@@ -1,12 +1,12 @@
-"""Tests for RemoteRocketship Playwright scraper (multi-profile)."""
+"""Tests for RemoteRocketship Playwright scraper (multi-profile, __NEXT_DATA__ extraction)."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from jobhunter.config.schema import RemoteRocketshipConfig, RemoteRocketshipSearchProfile
 from jobhunter.scrapers.exceptions import ScraperTimeoutError
-from jobhunter.scrapers.rate_limiter import RateLimiter
 from jobhunter.scrapers.remoterocketship import RemoteRocketshipScraper
 
 
@@ -18,87 +18,151 @@ class TestRemoteRocketshipScraper:
     def test_scraper_name(self, scraper) -> None:
         assert scraper.scraper_name == "remote_rocketship"
 
-    @pytest.mark.asyncio
-    async def test_load_all_listings_stops_after_no_change(self, scraper) -> None:
-        """Three rounds of no new items → stops scrolling."""
-        mock_page = AsyncMock()
-        mock_page.query_selector = AsyncMock(return_value=None)  # No "Load more" button
-        mock_page.evaluate = AsyncMock(return_value=5)  # Always 5 items
+    # --- URL page parameter ---
 
-        rate_limiter = RateLimiter(0)
-        with patch("jobhunter.scrapers.remoterocketship.RateLimiter", return_value=rate_limiter):
-            await scraper._load_all_listings(mock_page, rate_limiter, max_pages=2)
+    def test_set_page_param_adds_page(self) -> None:
+        url = "https://www.remoterocketship.com/?sort=DateAdded&minSalary=90000"
+        result = RemoteRocketshipScraper._set_page_param(url, 3)
+        assert "page=3" in result
+        assert "sort=DateAdded" in result
 
-        # Should have scrolled and checked 3 times (no_change_rounds threshold)
-        assert mock_page.evaluate.call_count >= 3
+    def test_set_page_param_replaces_existing(self) -> None:
+        url = "https://www.remoterocketship.com/?page=1&sort=DateAdded"
+        result = RemoteRocketshipScraper._set_page_param(url, 5)
+        assert "page=5" in result
+        assert "page=1" not in result
 
-    @pytest.mark.asyncio
-    async def test_load_all_listings_stops_at_max_items(self, scraper) -> None:
-        """Stops when max_items reached."""
-        mock_page = AsyncMock()
-        mock_page.query_selector = AsyncMock(return_value=None)
-
-        # evaluate is called for: scrollTo (returns None), then querySelectorAll count
-        # Pattern per loop iteration: scrollTo call, count call
-        call_results = [
-            None, 10,   # round 1: scroll, count=10
-            None, 25,   # round 2: scroll, count=25
-            None, 45,   # round 3: scroll, count=45 >= 40 (max_pages=2, 2*20=40)
-        ]
-        mock_page.evaluate = AsyncMock(side_effect=call_results)
-
-        rate_limiter = RateLimiter(0)
-        await scraper._load_all_listings(mock_page, rate_limiter, max_pages=2)
+    # --- __NEXT_DATA__ extraction ---
 
     @pytest.mark.asyncio
-    async def test_load_all_listings_clicks_load_more(self, scraper) -> None:
-        """Clicks Load more button when present."""
-        load_more_btn = AsyncMock()
-        load_more_btn.click = AsyncMock()
-
+    async def test_extract_jobs_from_json_success(self, scraper) -> None:
+        """Extracts jobs from __NEXT_DATA__ pageProps.jobs array."""
+        next_data = {
+            "props": {
+                "pageProps": {
+                    "jobs": [
+                        {
+                            "roleTitle": "Senior Engineer",
+                            "slug": "senior-engineer-remote",
+                            "location": "United States",
+                            "locationType": "remote",
+                            "salaryRange": None,
+                            "jobDescriptionSummary": "Build cool stuff.",
+                            "company": {
+                                "name": "Acme Corp",
+                                "slug": "acme-corp",
+                            },
+                        },
+                    ]
+                }
+            }
+        }
         mock_page = AsyncMock()
-        # First query_selector: Load more button found; subsequent: None (no button)
-        mock_page.query_selector = AsyncMock(
-            side_effect=[load_more_btn, None, None, None]
+        mock_page.evaluate = AsyncMock(return_value=json.dumps(next_data))
+
+        results = await scraper._extract_jobs_from_json(mock_page)
+        assert len(results) == 1
+        assert results[0]["title"] == "Senior Engineer"
+        assert results[0]["company"] == "Acme Corp"
+        assert results[0]["detail_url"] == (
+            "https://www.remoterocketship.com/company/acme-corp/jobs/senior-engineer-remote/"
         )
-        # When load_more is clicked, no scrollTo evaluate call happens.
-        # Pattern: round1 (click, count=5), round2-4 (scroll, count=5)
-        call_results = [
-            5,           # round 1: count only (button was clicked, not scroll)
-            None, 5,     # round 2: scroll, count=5
-            None, 5,     # round 3: scroll, count=5
-            None, 5,     # round 4: scroll, count=5 (3 no-change rounds reached)
-        ]
-        mock_page.evaluate = AsyncMock(side_effect=call_results)
+        assert results[0]["location_raw"] == "United States – remote"
+        assert results[0]["summary"] == "Build cool stuff."
 
-        rate_limiter = RateLimiter(0)
-        await scraper._load_all_listings(mock_page, rate_limiter, max_pages=2)
-        load_more_btn.click.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_extract_jobs_from_json_no_next_data(self, scraper) -> None:
+        """Returns empty list when __NEXT_DATA__ script tag is missing."""
+        mock_page = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value=None)
+
+        results = await scraper._extract_jobs_from_json(mock_page)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_extract_jobs_from_json_dehydrated_state(self, scraper) -> None:
+        """Finds jobs in dehydratedState.queries fallback path."""
+        next_data = {
+            "props": {
+                "pageProps": {
+                    "dehydratedState": {
+                        "queries": [
+                            {
+                                "state": {
+                                    "data": [
+                                        {
+                                            "roleTitle": "DevOps Lead",
+                                            "slug": "devops-lead-remote",
+                                            "company": {"name": "Cloud Inc", "slug": "cloud-inc"},
+                                            "location": "Remote",
+                                            "locationType": "remote",
+                                            "salaryRange": None,
+                                            "jobDescriptionSummary": "Lead DevOps.",
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        mock_page = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value=json.dumps(next_data))
+
+        results = await scraper._extract_jobs_from_json(mock_page)
+        assert len(results) == 1
+        assert results[0]["title"] == "DevOps Lead"
+
+    # --- Salary extraction ---
+
+    def test_extract_salary_none(self) -> None:
+        assert RemoteRocketshipScraper._extract_salary({}) is None
+        assert RemoteRocketshipScraper._extract_salary({"salaryRange": None}) is None
+
+    def test_extract_salary_string(self) -> None:
+        result = RemoteRocketshipScraper._extract_salary({"salaryRange": "$100K - $150K"})
+        assert result == "$100K - $150K"
+
+    def test_extract_salary_dict(self) -> None:
+        job = {"salaryRange": {"min": 100000, "max": 150000, "currency": "USD"}}
+        result = RemoteRocketshipScraper._extract_salary(job)
+        assert result is not None
+        assert "100,000" in result
+        assert "150,000" in result
+
+    # --- Detail page ---
 
     @pytest.mark.asyncio
     async def test_scrape_detail_page_success(self, scraper) -> None:
         mock_page = AsyncMock()
-        desc_el = AsyncMock()
-        desc_el.inner_text = AsyncMock(return_value="Job description text.")
-        mock_page.query_selector = AsyncMock(return_value=desc_el)
         mock_page.content = AsyncMock(return_value="<html>detail</html>")
 
-        with patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock):
-            card = {
-                "title": "Principal Engineer",
-                "company": "RocketCo",
-                "detail_url": "https://www.remoterocketship.com/job/1",
-                "salary_raw": "$150K",
-                "location_raw": "Remote",
-                "tags": ["Python", "AWS"],
-            }
-            result = await scraper._scrape_detail_page(mock_page, card)
+        # __NEXT_DATA__ extraction returns empty (force CSS fallback)
+        with patch.object(
+            scraper, "_extract_description_from_json",
+            new_callable=AsyncMock, return_value="",
+        ):
+            desc_el = AsyncMock()
+            desc_el.inner_text = AsyncMock(return_value="Job description text.")
+            mock_page.query_selector = AsyncMock(return_value=desc_el)
+
+            with patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock):
+                job_info = {
+                    "title": "Principal Engineer",
+                    "company": "RocketCo",
+                    "detail_url": "https://www.remoterocketship.com/company/rocketco/jobs/principal/",
+                    "salary_raw": "$150K",
+                    "location_raw": "Remote",
+                    "summary": "Fallback summary.",
+                }
+                result = await scraper._scrape_detail_page(mock_page, job_info)
 
         assert result is not None
         assert result.source == "remote_rocketship"
         assert result.title == "Principal Engineer"
         assert result.description == "Job description text."
-        assert result.location_raw == "Remote [Python, AWS]"
+        assert result.location_raw == "Remote"
         assert result.raw_html == "<html>detail</html>"
 
     @pytest.mark.asyncio
@@ -109,27 +173,41 @@ class TestRemoteRocketshipScraper:
             scraper, "_navigate_with_retry", new_callable=AsyncMock,
             side_effect=ScraperTimeoutError("remote_rocketship", "timeout"),
         ):
-            card = {
+            job_info = {
                 "title": "Eng",
                 "company": "Co",
-                "detail_url": "https://www.remoterocketship.com/job/1",
+                "detail_url": "https://www.remoterocketship.com/company/co/jobs/eng/",
             }
-            result = await scraper._scrape_detail_page(mock_page, card)
+            result = await scraper._scrape_detail_page(mock_page, job_info)
 
         assert result is None
 
-    def test_tags_appended_to_location(self, scraper) -> None:
-        """Verify tag appending logic used in _scrape_detail_page."""
-        location = "Remote"
-        tags = ["Python", "EU"]
-        result = f"{location} [{', '.join(tags)}]".strip()
-        assert result == "Remote [Python, EU]"
+    @pytest.mark.asyncio
+    async def test_scrape_detail_page_fallback_to_summary(self, scraper) -> None:
+        """Falls back to search-page summary when no description found."""
+        mock_page = AsyncMock()
+        mock_page.query_selector = AsyncMock(return_value=None)  # No CSS description
+        mock_page.content = AsyncMock(return_value="<html></html>")
 
-    def test_tags_with_no_location(self, scraper) -> None:
-        location = ""
-        tags = ["Senior", "AWS"]
-        result = f"{location} [{', '.join(tags)}]".strip()
-        assert result == "[Senior, AWS]"
+        with (
+            patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
+            patch.object(
+                scraper, "_extract_description_from_json",
+                new_callable=AsyncMock, return_value="",
+            ),
+        ):
+            job_info = {
+                "title": "Eng",
+                "company": "Co",
+                "detail_url": "https://example.com/job/1",
+                "summary": "Summary from search page.",
+            }
+            result = await scraper._scrape_detail_page(mock_page, job_info)
+
+        assert result is not None
+        assert result.description == "Summary from search page."
+
+    # --- Profile / scrape integration ---
 
     @pytest.mark.asyncio
     async def test_scrape_no_profiles(self, secrets_no_apify) -> None:
@@ -140,32 +218,23 @@ class TestRemoteRocketshipScraper:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_structure_error_empty_cards(self, scraper, caplog) -> None:
-        """Empty cards after loading logs error but continues (failure isolation)."""
+    async def test_scrape_profile_no_jobs(self, scraper, caplog) -> None:
+        """No jobs from __NEXT_DATA__ → returns empty (no longer raises)."""
         mock_page = AsyncMock()
-        mock_context = AsyncMock()
-        mock_context.new_page = AsyncMock(return_value=mock_page)
-        mock_browser = AsyncMock()
-        mock_browser.close = AsyncMock()
 
         with (
-            patch.object(scraper, "_create_context", new_callable=AsyncMock, return_value=mock_context),
             patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
-            patch.object(scraper, "_load_all_listings", new_callable=AsyncMock),
-            patch.object(scraper, "_extract_job_cards", new_callable=AsyncMock, return_value=[]),
-            patch("jobhunter.scrapers.remoterocketship.async_playwright") as mock_pw,
-            patch("jobhunter.scrapers.remoterocketship.RateLimiter") as mock_rl,
+            patch.object(
+                scraper, "_extract_jobs_from_json",
+                new_callable=AsyncMock, return_value=[],
+            ),
         ):
-            mock_chromium = AsyncMock(launch=AsyncMock(return_value=mock_browser))
-            mock_pw.return_value.__aenter__ = AsyncMock(
-                return_value=AsyncMock(chromium=mock_chromium)
+            profile = RemoteRocketshipSearchProfile(
+                label="Empty", url="https://rrs.com/empty", max_pages=1
             )
-            mock_pw.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_rl.return_value.wait = AsyncMock()
-
-            results = await scraper.scrape()
+            results = await scraper._scrape_profile(mock_page, profile)
             assert results == []
-            assert "No job cards found" in caplog.text
+            assert "no jobs found" in caplog.text
 
     @pytest.mark.asyncio
     async def test_multi_profile_dedup(self, secrets_no_apify) -> None:

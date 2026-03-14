@@ -1,5 +1,6 @@
-"""Tests for Remote.io Playwright scraper (multi-profile)."""
+"""Tests for Remote.io Playwright scraper (multi-profile, link-pattern + JSON-LD extraction)."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -17,6 +18,8 @@ class TestRemoteIoScraper:
     def test_scraper_name(self, scraper) -> None:
         assert scraper.scraper_name == "remote_io"
 
+    # --- URL building ---
+
     def test_build_listing_url_page1(self) -> None:
         url = RemoteIoScraper._build_listing_url("https://remote.io/remote-jobs", 1)
         assert url == "https://remote.io/remote-jobs"
@@ -29,6 +32,54 @@ class TestRemoteIoScraper:
     def test_build_listing_url_page5(self) -> None:
         url = RemoteIoScraper._build_listing_url("https://remote.io/remote-python-jobs", 5)
         assert url == "https://remote.io/remote-python-jobs?page=5"
+
+    # --- Company from URL ---
+
+    def test_parse_company_from_url(self) -> None:
+        url = "https://remote.io/remote-software-development-jobs/senior-engineer-at-ping-identity-67499"
+        result = RemoteIoScraper._parse_company_from_url(url)
+        assert result == "Ping Identity"
+
+    def test_parse_company_from_url_single_word(self) -> None:
+        url = "https://remote.io/remote-data-jobs/analyst-at-google-12345"
+        result = RemoteIoScraper._parse_company_from_url(url)
+        assert result == "Google"
+
+    def test_parse_company_from_url_no_match(self) -> None:
+        url = "https://remote.io/some-other-page"
+        result = RemoteIoScraper._parse_company_from_url(url)
+        assert result == ""
+
+    # --- JSON-LD location extraction ---
+
+    def test_extract_location_single(self) -> None:
+        json_ld = {
+            "applicantLocationRequirements": {"@type": "AdministrativeArea", "name": "Italy"},
+            "jobLocationType": "TELECOMMUTE",
+        }
+        result = RemoteIoScraper._extract_location_from_json_ld(json_ld)
+        assert result == "Italy — TELECOMMUTE"
+
+    def test_extract_location_no_requirements(self) -> None:
+        json_ld = {"jobLocationType": "TELECOMMUTE"}
+        result = RemoteIoScraper._extract_location_from_json_ld(json_ld)
+        assert result == "TELECOMMUTE"
+
+    def test_extract_location_empty(self) -> None:
+        result = RemoteIoScraper._extract_location_from_json_ld({})
+        assert result is None
+
+    def test_extract_location_list(self) -> None:
+        json_ld = {
+            "applicantLocationRequirements": [
+                {"@type": "AdministrativeArea", "name": "US"},
+                {"@type": "AdministrativeArea", "name": "Canada"},
+            ]
+        }
+        result = RemoteIoScraper._extract_location_from_json_ld(json_ld)
+        assert result == "US — Canada"
+
+    # --- Navigation retry ---
 
     @pytest.mark.asyncio
     async def test_navigate_with_retry_success_first_try(self, scraper) -> None:
@@ -65,92 +116,158 @@ class TestRemoteIoScraper:
 
         assert mock_page.goto.call_count == 3  # initial + 2 retries
 
+    # --- Job link extraction ---
+
     @pytest.mark.asyncio
-    async def test_extract_job_cards(self, scraper) -> None:
-        """Mock Playwright page with job card elements."""
-
-        def _make_card(title: str, company: str, href: str, salary: str | None = None):
-            card = AsyncMock()
-
-            title_el = AsyncMock()
-            title_el.inner_text = AsyncMock(return_value=title)
-            company_el = AsyncMock()
-            company_el.inner_text = AsyncMock(return_value=company)
-            link_el = AsyncMock()
-            link_el.get_attribute = AsyncMock(return_value=href)
-
-            if salary:
-                salary_el = AsyncMock()
-                salary_el.inner_text = AsyncMock(return_value=salary)
-            else:
-                salary_el = None
-
-            # Map selectors to elements using ordered checks
-            selector_map: list[tuple[str, AsyncMock | None]] = []
-            # Title selectors
-            selector_map.append(("h2", title_el))
-            # Company selectors
-            selector_map.append(("company-name", company_el))
-            # Link selectors
-            selector_map.append(("href", link_el))
-            # Salary selectors
-            selector_map.append(("salary", salary_el))
-
-            async def _qs(selector):
-                for key, el in selector_map:
-                    if key in selector:
-                        return el
-                return None
-
-            card.query_selector = _qs
-            return card
-
-        cards = [
-            _make_card("Senior Architect", "TechCo", "/job/senior-architect", "$150K"),
-            _make_card("Lead Dev", "StartupCo", "https://remote.io/job/lead-dev"),
-        ]
-
+    async def test_extract_job_links(self, scraper) -> None:
+        """Extracts job links using URL pattern matching."""
         mock_page = AsyncMock()
-        mock_page.query_selector_all = AsyncMock(return_value=cards)
+        mock_page.evaluate = AsyncMock(return_value=[
+            {"href": "/remote-software-development-jobs/senior-eng-at-acme-12345", "text": "Senior Engineer"},
+            {"href": "/remote-data-jobs/data-analyst-at-bigco-67890", "text": "Data Analyst"},
+        ])
 
-        result = await scraper._extract_job_cards(mock_page)
+        result = await scraper._extract_job_links(mock_page)
         assert len(result) == 2
-        assert result[0]["title"] == "Senior Architect"
-        assert result[0]["company"] == "TechCo"
-        assert result[0]["detail_url"] == "https://remote.io/job/senior-architect"
-        assert result[1]["detail_url"] == "https://remote.io/job/lead-dev"
+        assert result[0]["detail_url"] == "https://remote.io/remote-software-development-jobs/senior-eng-at-acme-12345"
+        assert result[0]["title_hint"] == "Senior Engineer"
+        assert result[1]["detail_url"] == "https://remote.io/remote-data-jobs/data-analyst-at-bigco-67890"
 
     @pytest.mark.asyncio
-    async def test_extract_job_cards_empty(self, scraper) -> None:
+    async def test_extract_job_links_empty(self, scraper) -> None:
         mock_page = AsyncMock()
-        mock_page.query_selector_all = AsyncMock(return_value=[])
+        mock_page.evaluate = AsyncMock(return_value=[])
 
-        result = await scraper._extract_job_cards(mock_page)
+        result = await scraper._extract_job_links(mock_page)
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_scrape_detail_page_success(self, scraper) -> None:
+    async def test_extract_job_links_error(self, scraper) -> None:
         mock_page = AsyncMock()
-        mock_page.goto = AsyncMock()
-        desc_el = AsyncMock()
-        desc_el.inner_text = AsyncMock(return_value="Full job description here.")
-        mock_page.query_selector = AsyncMock(return_value=desc_el)
-        mock_page.content = AsyncMock(return_value="<html>raw</html>")
+        mock_page.evaluate = AsyncMock(side_effect=Exception("JS error"))
 
-        card = {
-            "title": "Engineer",
-            "company": "Co",
-            "detail_url": "https://remote.io/job/1",
-            "salary_raw": "$100K",
-            "location_raw": "Remote",
+        result = await scraper._extract_job_links(mock_page)
+        assert result == []
+
+    # --- JSON-LD extraction ---
+
+    @pytest.mark.asyncio
+    async def test_extract_json_ld_success(self, scraper) -> None:
+        job_posting = {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Senior Engineer",
+            "hiringOrganization": {"@type": "Organization", "name": "Acme Corp"},
+            "datePosted": "2026-03-10",
+        }
+        mock_page = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value=[json.dumps(job_posting)])
+
+        result = await scraper._extract_json_ld(mock_page)
+        assert result is not None
+        assert result["title"] == "Senior Engineer"
+        assert result["hiringOrganization"]["name"] == "Acme Corp"
+
+    @pytest.mark.asyncio
+    async def test_extract_json_ld_no_job_posting(self, scraper) -> None:
+        other_ld = {"@context": "https://schema.org", "@type": "Organization", "name": "Foo"}
+        mock_page = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value=[json.dumps(other_ld)])
+
+        result = await scraper._extract_json_ld(mock_page)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_extract_json_ld_array_format(self, scraper) -> None:
+        """JSON-LD can be an array of objects."""
+        job_posting = [
+            {"@type": "Organization", "name": "Foo"},
+            {"@type": "JobPosting", "title": "Dev"},
+        ]
+        mock_page = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value=[json.dumps(job_posting)])
+
+        result = await scraper._extract_json_ld(mock_page)
+        assert result is not None
+        assert result["title"] == "Dev"
+
+    @pytest.mark.asyncio
+    async def test_extract_json_ld_empty(self, scraper) -> None:
+        mock_page = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value=[])
+
+        result = await scraper._extract_json_ld(mock_page)
+        assert result is None
+
+    # --- Detail page ---
+
+    @pytest.mark.asyncio
+    async def test_scrape_detail_page_with_json_ld(self, scraper) -> None:
+        """Full detail page extraction using JSON-LD."""
+        json_ld = {
+            "@type": "JobPosting",
+            "title": "Principal Engineer",
+            "hiringOrganization": {"@type": "Organization", "name": "TechCo"},
+            "applicantLocationRequirements": {"name": "Remote"},
+            "jobLocationType": "TELECOMMUTE",
+            "datePosted": "2026-03-10",
         }
 
-        result = await scraper._scrape_detail_page(mock_page, card)
+        mock_page = AsyncMock()
+        mock_page.content = AsyncMock(return_value="<html>detail</html>")
+
+        with (
+            patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
+            patch.object(
+                scraper, "_extract_json_ld",
+                new_callable=AsyncMock, return_value=json_ld,
+            ),
+            patch.object(
+                scraper, "_extract_description",
+                new_callable=AsyncMock, return_value="Full job description here.",
+            ),
+        ):
+            link_info = {
+                "detail_url": "https://remote.io/remote-software-development-jobs/principal-eng-at-techco-99999",
+                "title_hint": "Principal Engineer",
+            }
+            result = await scraper._scrape_detail_page(mock_page, link_info)
+
         assert result is not None
         assert result.source == "remote_io"
-        assert result.title == "Engineer"
+        assert result.title == "Principal Engineer"
+        assert result.company == "TechCo"
         assert result.description == "Full job description here."
-        assert result.raw_html == "<html>raw</html>"
+        assert result.location_raw == "Remote — TELECOMMUTE"
+        assert result.posted_date_raw == "2026-03-10"
+        assert result.raw_html == "<html>detail</html>"
+
+    @pytest.mark.asyncio
+    async def test_scrape_detail_page_no_json_ld_fallback(self, scraper) -> None:
+        """Falls back to URL parsing when JSON-LD is unavailable."""
+        mock_page = AsyncMock()
+        mock_page.content = AsyncMock(return_value="<html>basic</html>")
+
+        with (
+            patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
+            patch.object(
+                scraper, "_extract_json_ld",
+                new_callable=AsyncMock, return_value=None,
+            ),
+            patch.object(
+                scraper, "_extract_description",
+                new_callable=AsyncMock, return_value="Some description.",
+            ),
+        ):
+            link_info = {
+                "detail_url": "https://remote.io/remote-data-jobs/analyst-at-big-corp-12345",
+                "title_hint": "Data Analyst",
+            }
+            result = await scraper._scrape_detail_page(mock_page, link_info)
+
+        assert result is not None
+        assert result.title == "Data Analyst"
+        assert result.company == "Big Corp"
 
     @pytest.mark.asyncio
     async def test_scrape_detail_page_timeout(self, scraper) -> None:
@@ -160,10 +277,12 @@ class TestRemoteIoScraper:
             scraper, "_navigate_with_retry", new_callable=AsyncMock,
             side_effect=ScraperTimeoutError("remote_io", "timeout"),
         ):
-            card = {"title": "Eng", "company": "Co", "detail_url": "https://remote.io/job/1"}
-            result = await scraper._scrape_detail_page(mock_page, card)
+            link_info = {"detail_url": "https://remote.io/remote-jobs/eng-at-co-1", "title_hint": "Eng"}
+            result = await scraper._scrape_detail_page(mock_page, link_info)
 
         assert result is None
+
+    # --- Profile / scrape integration ---
 
     @pytest.mark.asyncio
     async def test_scrape_no_profiles(self, secrets_no_apify) -> None:
@@ -174,8 +293,8 @@ class TestRemoteIoScraper:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_structure_error_page1_empty(self, scraper, caplog) -> None:
-        """Empty page 1 logs error but continues (failure isolation)."""
+    async def test_page1_empty_warns(self, scraper, caplog) -> None:
+        """Empty page 1 logs warning but continues (failure isolation)."""
         mock_page = AsyncMock()
         mock_context = AsyncMock()
         mock_context.new_page = AsyncMock(return_value=mock_page)
@@ -185,7 +304,7 @@ class TestRemoteIoScraper:
         with (
             patch.object(scraper, "_create_context", new_callable=AsyncMock, return_value=mock_context),
             patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
-            patch.object(scraper, "_extract_job_cards", new_callable=AsyncMock, return_value=[]),
+            patch.object(scraper, "_extract_job_links", new_callable=AsyncMock, return_value=[]),
             patch("jobhunter.scrapers.remote_io.async_playwright") as mock_pw,
         ):
             mock_chromium = AsyncMock(launch=AsyncMock(return_value=mock_browser))
@@ -196,37 +315,7 @@ class TestRemoteIoScraper:
 
             results = await scraper.scrape()
             assert results == []
-            assert "No job cards found on page 1" in caplog.text
-
-    @pytest.mark.asyncio
-    async def test_no_error_page2_empty(self, scraper) -> None:
-        """Empty page 2 just stops pagination — no error."""
-        mock_page = AsyncMock()
-        mock_context = AsyncMock()
-        mock_context.new_page = AsyncMock(return_value=mock_page)
-        mock_browser = AsyncMock()
-        mock_browser.close = AsyncMock()
-
-        card_data = [{"title": "Eng", "company": "Co", "detail_url": "https://remote.io/job/1"}]
-
-        with (
-            patch.object(scraper, "_create_context", new_callable=AsyncMock, return_value=mock_context),
-            patch.object(scraper, "_navigate_with_retry", new_callable=AsyncMock),
-            patch.object(scraper, "_extract_job_cards", new_callable=AsyncMock, side_effect=[card_data, []]),
-            patch.object(scraper, "_scrape_detail_page", new_callable=AsyncMock, return_value=None),
-            patch("jobhunter.scrapers.remote_io.async_playwright") as mock_pw,
-            patch("jobhunter.scrapers.remote_io.RateLimiter") as mock_rl,
-        ):
-            mock_chromium = AsyncMock(launch=AsyncMock(return_value=mock_browser))
-            mock_pw.return_value.__aenter__ = AsyncMock(
-                return_value=AsyncMock(chromium=mock_chromium)
-            )
-            mock_pw.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_rl.return_value.wait = AsyncMock()
-
-            # Should NOT raise — page 2 empty is normal pagination end
-            result = await scraper.scrape()
-            assert result == []  # detail pages returned None
+            assert "No job links found on page 1" in caplog.text
 
     @pytest.mark.asyncio
     async def test_multi_profile_dedup(self, secrets_no_apify) -> None:

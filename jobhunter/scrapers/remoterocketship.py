@@ -1,12 +1,16 @@
 import asyncio
+import json
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from jobhunter.config.schema import RemoteRocketshipSearchProfile
 from jobhunter.scrapers.base import BaseScraper, RawJobData
-from jobhunter.scrapers.exceptions import ScraperStructureError, ScraperTimeoutError
+from jobhunter.scrapers.exceptions import ScraperTimeoutError
 from jobhunter.scrapers.rate_limiter import RateLimiter
+
+_BASE_URL = "https://www.remoterocketship.com"
 
 
 class RemoteRocketshipScraper(BaseScraper):
@@ -14,6 +18,9 @@ class RemoteRocketshipScraper(BaseScraper):
 
     Supports multi-profile search: each profile has its own URL and max_pages.
     Single browser instance shared across all profiles.
+
+    Extracts job data from Next.js __NEXT_DATA__ JSON embedded in the page,
+    which is more reliable than CSS selectors on this site.
     """
 
     @property
@@ -58,24 +65,47 @@ class RemoteRocketshipScraper(BaseScraper):
     async def _scrape_profile(
         self, page: Page, profile: RemoteRocketshipSearchProfile
     ) -> list[RawJobData]:
-        """Scrape a single search profile using a shared browser page."""
-        results: list[RawJobData] = []
+        """Scrape a single search profile by paginating through search results.
+
+        Navigates page-by-page (using ?page=N param), extracts job listings
+        from __NEXT_DATA__ JSON on each page, then visits detail pages for
+        full descriptions.
+        """
+        job_infos: list[dict] = []
         rate_limiter = RateLimiter(self._config.delay_seconds)  # type: ignore[attr-defined]
 
-        await self._navigate_with_retry(page, profile.url)
-        await self._load_all_listings(page, rate_limiter, profile.max_pages)
-        cards = await self._extract_job_cards(page)
+        for page_num in range(1, profile.max_pages + 1):
+            page_url = self._set_page_param(profile.url, page_num)
+            await self._navigate_with_retry(page, page_url)
 
-        if not cards:
-            raise ScraperStructureError(
-                self.scraper_name,
-                f"No job cards found for profile '{profile.label}'. "
-                "CSS selectors may need updating.",
+            page_jobs = await self._extract_jobs_from_json(page)
+            if not page_jobs:
+                self._logger.info(
+                    "Profile '%s' page %d: no jobs found, stopping pagination",
+                    profile.label,
+                    page_num,
+                )
+                break
+
+            job_infos.extend(page_jobs)
+            self._logger.info(
+                "Profile '%s' page %d: %d jobs", profile.label, page_num, len(page_jobs)
             )
-
-        for card in cards:
             await rate_limiter.wait()
-            detail = await self._scrape_detail_page(page, card)
+
+        if not job_infos:
+            self._logger.warning(
+                "Profile '%s': no jobs found across %d pages",
+                profile.label,
+                profile.max_pages,
+            )
+            return []
+
+        # Visit detail pages for full descriptions
+        results: list[RawJobData] = []
+        for info in job_infos:
+            await rate_limiter.wait()
+            detail = await self._scrape_detail_page(page, info)
             if detail:
                 results.append(detail)
 
@@ -106,112 +136,221 @@ class RemoteRocketshipScraper(BaseScraper):
                 self._logger.warning("Timeout %s (attempt %d/%d)", url, attempt + 1, max_retries + 1)
                 await asyncio.sleep(2**attempt)
 
-    async def _load_all_listings(
-        self, page: Page, rate_limiter: RateLimiter, max_pages: int
-    ) -> None:
-        """Scroll to load all job listings (infinite scroll / load-more button).
+    @staticmethod
+    def _set_page_param(url: str, page_num: int) -> str:
+        """Set or replace the ?page=N parameter in a URL."""
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        params["page"] = [str(page_num)]
+        new_query = urlencode(params, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
 
-        Stops when:
-        - max_pages equivalent of items loaded (max_pages * ~20 items/page)
-        - No new items appear after scrolling
-        - Load-more button disappears
+    async def _extract_jobs_from_json(self, page: Page) -> list[dict]:
+        """Extract job listings from the __NEXT_DATA__ JSON embedded in the page.
+
+        Returns a list of dicts with keys: title, company, detail_url,
+        salary_raw, location_raw, summary.
         """
-        max_items: int = max_pages * 20
-        prev_count = 0
-        no_change_rounds = 0
-
-        while no_change_rounds < 3:
-            # Try clicking "Load more" button if present
-            load_more = await page.query_selector(
-                "button:has-text('Load more'), button:has-text('Show more'), .load-more"
+        try:
+            raw_json: str | None = await page.evaluate(
+                "(() => {"
+                "  const el = document.getElementById('__NEXT_DATA__');"
+                "  return el ? el.textContent : null;"
+                "})()"
             )
-            if load_more:
-                await load_more.click()
-                await rate_limiter.wait()
-            else:
-                # Scroll to bottom
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await rate_limiter.wait()
+        except Exception as e:
+            self._logger.warning("Failed to extract __NEXT_DATA__: %s", e)
+            return []
 
-            current_count: int = await page.evaluate(
-                "document.querySelectorAll('.job-card, [data-testid=\"job-card\"], .job-listing').length"
-            )
+        if not raw_json:
+            self._logger.warning("No __NEXT_DATA__ found on page")
+            return []
 
-            if current_count >= max_items:
-                self._logger.info("Reached max items (%d), stopping scroll", max_items)
-                break
-            elif current_count == prev_count:
-                no_change_rounds += 1
-            else:
-                no_change_rounds = 0
+        try:
+            data = json.loads(raw_json)
+        except json.JSONDecodeError as e:
+            self._logger.warning("Failed to parse __NEXT_DATA__ JSON: %s", e)
+            return []
 
-            prev_count = current_count
+        # Navigate the Next.js data structure to find job listings
+        jobs_raw = self._find_jobs_in_next_data(data)
+        if not jobs_raw:
+            return []
 
-    async def _extract_job_cards(self, page: Page) -> list[dict]:
-        """Extract all visible job cards from the loaded page.
-
-        NOTE: CSS selectors are placeholders — finalize with live site inspection.
-        """
-        cards = await page.query_selector_all(".job-card, [data-testid='job-card'], .job-listing")
         results: list[dict] = []
+        for job in jobs_raw:
+            title = job.get("roleTitle") or job.get("title")
+            company_obj = job.get("company") or {}
+            company_name = company_obj.get("name") if isinstance(company_obj, dict) else str(company_obj)
+            company_slug = company_obj.get("slug", "") if isinstance(company_obj, dict) else ""
+            slug = job.get("slug", "")
 
-        for card in cards:
-            title_el = await card.query_selector("h2, h3, .job-title")
-            company_el = await card.query_selector(".company-name, .company")
-            link_el = await card.query_selector("a[href*='/job/'], a[href*='/remote-']")
-            salary_el = await card.query_selector(".salary, .compensation")
-            location_el = await card.query_selector(".location, .remote-info")
-            tags_el = await card.query_selector_all(".tag, .badge, .label")
+            if not title or not company_name or not slug:
+                continue
 
-            title = await title_el.inner_text() if title_el else None
-            company = await company_el.inner_text() if company_el else None
-            href = await link_el.get_attribute("href") if link_el else None
+            detail_url = f"{_BASE_URL}/company/{company_slug}/jobs/{slug}/"
 
-            if title and company and href:
-                tag_texts = [await t.inner_text() for t in tags_el] if tags_el else []
-                results.append({
-                    "title": title.strip(),
-                    "company": company.strip(),
-                    "salary_raw": (await salary_el.inner_text()).strip() if salary_el else None,
-                    "location_raw": (await location_el.inner_text()).strip() if location_el else None,
-                    "tags": tag_texts,
-                    "detail_url": href if href.startswith("http") else f"https://www.remoterocketship.com{href}",
-                })
+            # Build salary string from salaryRange
+            salary_raw = self._extract_salary(job)
+
+            # Location
+            location = job.get("location") or ""
+            location_type = job.get("locationType") or ""
+            if location_type:
+                location = f"{location} – {location_type}".strip(" –")
+
+            # Summary (used as fallback description if detail page fails)
+            summary = (
+                job.get("jobDescriptionSummary")
+                or job.get("twoLineJobDescriptionSummary")
+                or ""
+            )
+
+            results.append({
+                "title": title.strip(),
+                "company": company_name.strip(),
+                "detail_url": detail_url,
+                "salary_raw": salary_raw,
+                "location_raw": location or None,
+                "summary": summary,
+            })
 
         return results
 
-    async def _scrape_detail_page(self, page: Page, card: dict) -> RawJobData | None:
-        """Navigate to detail page and extract full description."""
+    def _find_jobs_in_next_data(self, data: dict) -> list[dict]:
+        """Locate the job listings array within __NEXT_DATA__.
+
+        The structure varies but is typically at:
+        props.pageProps.jobs or props.pageProps.dehydratedState.queries[*].state.data
+        """
         try:
-            await self._navigate_with_retry(page, card["detail_url"])
+            page_props = data.get("props", {}).get("pageProps", {})
 
-            description_el = await page.query_selector(
-                ".job-description, .description, article, [data-testid='description']"
-            )
-            description = await description_el.inner_text() if description_el else ""
+            # Direct jobs array
+            if "jobs" in page_props and isinstance(page_props["jobs"], list):
+                return page_props["jobs"]
+
+            # Dehydrated React Query state
+            dehydrated = page_props.get("dehydratedState", {})
+            for query in dehydrated.get("queries", []):
+                state_data = query.get("state", {}).get("data", {})
+                if isinstance(state_data, list):
+                    # Check if items look like jobs
+                    if state_data and isinstance(state_data[0], dict) and "roleTitle" in state_data[0]:
+                        return state_data
+                # Paginated response with items/data key
+                if isinstance(state_data, dict):
+                    for key in ("items", "data", "jobs", "results"):
+                        candidate = state_data.get(key)
+                        if isinstance(candidate, list) and candidate:
+                            if isinstance(candidate[0], dict) and (
+                                "roleTitle" in candidate[0] or "title" in candidate[0]
+                            ):
+                                return candidate
+
+            # Fallback: search all pageProps values for a list of job-like dicts
+            for value in page_props.values():
+                if isinstance(value, list) and len(value) > 0:
+                    if isinstance(value[0], dict) and (
+                        "roleTitle" in value[0] or "slug" in value[0]
+                    ):
+                        return value
+
+        except (KeyError, TypeError, IndexError) as e:
+            self._logger.warning("Unexpected __NEXT_DATA__ structure: %s", e)
+
+        return []
+
+    @staticmethod
+    def _extract_salary(job: dict) -> str | None:
+        """Extract a human-readable salary string from a job dict."""
+        salary_range = job.get("salaryRange")
+        if salary_range:
+            if isinstance(salary_range, str):
+                return salary_range
+            if isinstance(salary_range, dict):
+                lo = salary_range.get("min") or salary_range.get("minValue")
+                hi = salary_range.get("max") or salary_range.get("maxValue")
+                currency = salary_range.get("currency", "USD")
+                if lo and hi:
+                    return f"${lo:,} - ${hi:,} / year ({currency})"
+                if lo:
+                    return f"${lo:,}+ / year ({currency})"
+        return None
+
+    async def _scrape_detail_page(self, page: Page, job_info: dict) -> RawJobData | None:
+        """Navigate to detail page and extract full description."""
+        detail_url = job_info["detail_url"]
+        try:
+            await self._navigate_with_retry(page, detail_url)
+
+            # Try __NEXT_DATA__ first for structured description
+            description = await self._extract_description_from_json(page)
+
+            # Fallback to CSS selectors for description
+            if not description:
+                description_el = await page.query_selector(
+                    "article, .job-description, .description, "
+                    "[data-testid='description'], [class*='description']"
+                )
+                description = await description_el.inner_text() if description_el else ""
+
+            # Final fallback to summary from search page
+            if not description:
+                description = job_info.get("summary", "")
+
             raw_html = await page.content()
-
-            # Append tags to location info if present
-            location = card.get("location_raw") or ""
-            if card.get("tags"):
-                location = f"{location} [{', '.join(card['tags'])}]".strip()
 
             return RawJobData(
                 source="remote_rocketship",
-                source_url=card["detail_url"],
-                title=card["title"],
-                company=card["company"],
+                source_url=detail_url,
+                title=job_info["title"],
+                company=job_info["company"],
                 description=description.strip(),
-                salary_raw=card.get("salary_raw"),
-                location_raw=location or None,
+                salary_raw=job_info.get("salary_raw"),
+                location_raw=job_info.get("location_raw"),
                 raw_html=raw_html,
             )
         except ScraperTimeoutError:
-            self._logger.warning("Timeout on detail page %s — skipping", card["detail_url"])
+            self._logger.warning("Timeout on detail page %s — skipping", detail_url)
             return None
         except Exception as e:
-            self._logger.error("Error scraping detail %s: %s", card["detail_url"], e)
+            self._logger.error("Error scraping detail %s: %s", detail_url, e)
             return None
+
+    async def _extract_description_from_json(self, page: Page) -> str:
+        """Try to extract job description from detail page __NEXT_DATA__."""
+        try:
+            raw_json: str | None = await page.evaluate(
+                "(() => {"
+                "  const el = document.getElementById('__NEXT_DATA__');"
+                "  return el ? el.textContent : null;"
+                "})()"
+            )
+            if not raw_json:
+                return ""
+
+            data = json.loads(raw_json)
+            page_props = data.get("props", {}).get("pageProps", {})
+
+            # Common locations for job description on detail pages
+            for key in ("job", "jobPosting", "posting"):
+                job_obj = page_props.get(key)
+                if isinstance(job_obj, dict):
+                    for desc_key in ("description", "jobDescription", "fullDescription"):
+                        desc = job_obj.get(desc_key)
+                        if desc and isinstance(desc, str) and len(desc) > 50:
+                            return str(desc)
+
+            # Check top-level pageProps
+            for desc_key in ("description", "jobDescription"):
+                desc = page_props.get(desc_key)
+                if desc and isinstance(desc, str) and len(desc) > 50:
+                    return str(desc)
+
+        except Exception:
+            pass
+        return ""
 
     async def health_check(self) -> bool:
         """Check if RemoteRocketship is reachable."""
