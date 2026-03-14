@@ -8,7 +8,7 @@ from jobhunter.dashboard.components.score_display import (
     fit_category_label,
     score_color,
 )
-from jobhunter.dashboard.components.status_badge import source_badge
+from jobhunter.dashboard.components.status_badge import source_label
 from jobhunter.db.models import MatchEvaluation, ProcessedJob, RawJobPosting
 
 
@@ -47,7 +47,7 @@ def render_tier3_card(
     score = best_eval.overall_score or 0
     color = score_color(score)
     fit = fit_category_label(best_eval.fit_category)
-    source = source_badge(raw_job.source)
+    source = source_label(raw_job.source)
     salary = _format_salary(job)
     location = _format_location(job)
 
@@ -60,10 +60,10 @@ def render_tier3_card(
     elif current_status == "applied":
         status_prefix = "**[APPLIED]** "
 
-    # Card header
+    # Card header (source moved to right column)
     header = (
         f"{status_prefix}"
-        f"**:{color}[{score}]** | {fit} | {source} | "
+        f"**:{color}[{score}]** | {fit} | "
         f"{raw_job.title} @ {raw_job.company}"
     )
 
@@ -86,8 +86,12 @@ def render_tier3_card(
 
     with st.container(border=True):
         st.markdown(f'<span class="{card_cls}"></span>', unsafe_allow_html=True)
-        st.markdown(header)
-        st.caption(f"{resume_label or '—'} | {location} | {salary}")
+        left, right = st.columns([5, 1])
+        with left:
+            st.markdown(header)
+            st.caption(f"{resume_label or '—'} | {location} | {salary}")
+        with right:
+            st.caption(f"**{source}**")
 
         # Score bars
         col1, col2, col3, col4 = st.columns(4)
@@ -125,16 +129,20 @@ def render_tier2_card(
     decision_map = {"yes": "PASS", "no": "FAIL", "maybe": "MAYBE"}
     decision = decision_map.get(best_eval.decision or "", best_eval.decision or "?")
     confidence = best_eval.confidence or 0.0
-    source = source_badge(raw_job.source)
+    source = source_label(raw_job.source)
     salary = _format_salary(job)
     location = _format_location(job)
 
     with st.container(border=True):
-        st.markdown(
-            f"**{decision}** ({confidence:.0%}) | {source} | "
-            f"{raw_job.title} @ {raw_job.company}"
-        )
-        st.caption(f"Tier 2 only | {location} | {salary}")
+        left, right = st.columns([5, 1])
+        with left:
+            st.markdown(
+                f"**{decision}** ({confidence:.0%}) | "
+                f"{raw_job.title} @ {raw_job.company}"
+            )
+            st.caption(f"Tier 2 only | {location} | {salary}")
+        with right:
+            st.caption(f"**{source}**")
 
         if best_eval.reasoning:
             st.caption(f'"{best_eval.reasoning}"')

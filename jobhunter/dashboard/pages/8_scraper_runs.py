@@ -43,12 +43,14 @@ def _is_stale(run: ScraperRun) -> bool:
     return elapsed > _STALE_THRESHOLD_SECONDS
 
 
-def _run_scraper_in_thread(scraper_name: str | None) -> None:
+def _run_scraper_in_thread(scraper_name: str | None, limit: int | None = None) -> None:
     """Entry point for background scraper thread.
 
     Creates its own DB session and event loop. Runs the orchestrator.
     scraper_name=None means run all enabled scrapers.
+    limit=None means no override (use config defaults).
     """
+    from jobhunter.cli import _apply_limit
     from jobhunter.config.loader import load_config, load_secrets
     from jobhunter.db.session import get_session as get_thread_session
     from jobhunter.db.settings import get_scraping_config
@@ -61,7 +63,10 @@ def _run_scraper_in_thread(scraper_name: str | None) -> None:
         with get_thread_session() as session:
             # Load scraping config from DB (overrides YAML)
             db_scraping = get_scraping_config(session)
-            config = config.model_copy(update={"scraping": db_scraping})
+            scraping = db_scraping
+            if limit is not None:
+                scraping = _apply_limit(scraping, limit, scraper_name)
+            config = config.model_copy(update={"scraping": scraping})
 
             orchestrator = ScraperOrchestrator(config, secrets, session)
 
@@ -98,10 +103,12 @@ def _render_trigger_section(session: Session) -> bool:
         st.info("Active scrapers: " + ", ".join(f"**{n}**" for n in sorted(active_names)))
 
     scraper_options = ["All enabled", "linkedin", "wellfound", "remote_io", "remote_rocketship"]
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         selected = st.selectbox("Scraper", scraper_options, key="trigger_scraper")
     with col2:
+        limit = st.number_input("Limit (total results)", min_value=1, value=10, step=5, key="trigger_limit")
+    with col3:
         st.markdown("")  # spacing
         st.markdown("")
         start_disabled = False
@@ -119,11 +126,11 @@ def _render_trigger_section(session: Session) -> bool:
             target_name = None if selected == "All enabled" else selected
             thread = threading.Thread(
                 target=_run_scraper_in_thread,
-                args=(target_name,),
+                args=(target_name, limit),
                 daemon=True,
             )
             thread.start()
-            st.success(f"Scrape started: **{selected}**")
+            st.success(f"Scrape started: **{selected}** (limit={limit})")
             time.sleep(1)  # brief pause to let the thread create the run record
             st.rerun()
 

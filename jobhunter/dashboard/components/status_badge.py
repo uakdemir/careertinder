@@ -20,6 +20,15 @@ SOURCE_ABBREV: dict[str, str] = {
     "manual": "MAN",
 }
 
+# Full display names for sources
+SOURCE_LABEL: dict[str, str] = {
+    "linkedin": "LinkedIn",
+    "wellfound": "Wellfound",
+    "remote_io": "Remote.io",
+    "remote_rocketship": "RemoteRocketship",
+    "manual": "Manual",
+}
+
 
 def status_badge(status: str) -> str:
     """Return a styled status string with emoji prefix."""
@@ -30,3 +39,8 @@ def status_badge(status: str) -> str:
 def source_badge(source: str) -> str:
     """Return a short abbreviation for a scraper source name."""
     return SOURCE_ABBREV.get(source, source.upper())
+
+
+def source_label(source: str) -> str:
+    """Return the full display name for a scraper source."""
+    return SOURCE_LABEL.get(source, source)

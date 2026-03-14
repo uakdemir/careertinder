@@ -21,6 +21,7 @@ DEFAULT_PAGE_SIZE = 25
 
 _STAGE_OPTIONS = [
     "Needs Review",
+    "Show All",
     "All Evaluated",
     "Tier 2 Only",
     "Tier 3 Only",
@@ -48,22 +49,33 @@ def _get_page_size() -> int:
     return DEFAULT_PAGE_SIZE
 
 
-def _render_filters() -> tuple[str, str, str, str]:
-    """Render filter controls. Returns (stage, fit, sort, search)."""
-    col1, col2, col3, col4 = st.columns([1.5, 1, 1.5, 2])
+def _get_source_options(session: Session) -> list[str]:
+    """Query distinct job sources from the database."""
+    rows = session.query(RawJobPosting.source).distinct().order_by(RawJobPosting.source).all()
+    return [row[0] for row in rows]
+
+
+def _render_filters(session: Session) -> tuple[str, str, str, str, str]:
+    """Render filter controls. Returns (stage, fit, sort, search, source)."""
+    sources = _get_source_options(session)
+    source_options = ["All Sources"] + sources
+
+    col1, col2, col3, col4, col5 = st.columns([1.5, 1, 1, 1.5, 2])
     with col1:
         stage = st.selectbox("Stage", _STAGE_OPTIONS, key="pr_stage")
     with col2:
         fit = st.selectbox("Fit", _FIT_OPTIONS, key="pr_fit")
     with col3:
-        sort = st.selectbox("Sort", _SORT_OPTIONS, key="pr_sort")
+        source = st.selectbox("Source", source_options, key="pr_source")
     with col4:
+        sort = st.selectbox("Sort", _SORT_OPTIONS, key="pr_sort")
+    with col5:
         search = st.text_input("Search title or company", key="pr_search")
-    return stage, fit, sort, search
+    return stage, fit, sort, search, source
 
 
 def _get_review_jobs(
-    session: Session, stage: str, fit: str, sort: str, search: str
+    session: Session, stage: str, fit: str, sort: str, search: str, source: str = "All Sources"
 ) -> list[dict]:
     """Query jobs with their best evaluation for the review list.
 
@@ -113,6 +125,10 @@ def _get_review_jobs(
     if fit != "All" and fit in _FIT_MAP:
         query = query.filter(MatchEvaluation.fit_category == _FIT_MAP[fit])
 
+    # Source filter
+    if source != "All Sources":
+        query = query.filter(RawJobPosting.source == source)
+
     # Search filter
     if search.strip():
         pattern = f"%{search.strip()}%"
@@ -154,13 +170,13 @@ def main() -> None:
 
     try:
         with get_session() as session:
-            stage, fit, sort, search = _render_filters()
+            stage, fit, sort, search, source = _render_filters(session)
 
             # Build resume label lookup
             resumes = session.query(ResumeProfile).all()
             resume_map: dict[int, str] = {r.resume_id: r.label for r in resumes}
 
-            jobs = _get_review_jobs(session, stage, fit, sort, search)
+            jobs = _get_review_jobs(session, stage, fit, sort, search, source)
             total = len(jobs)
 
             if total == 0:

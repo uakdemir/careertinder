@@ -78,22 +78,24 @@ def _render_scraping_section(session: Session) -> None:
 
     is_running = st.session_state.get("op_running", False)
 
-    col1, col2 = st.columns(2)
+    scraper_options = ["All enabled", "linkedin", "wellfound", "remote_io", "remote_rocketship"]
+    col1, col2 = st.columns([2, 1])
     with col1:
-        if st.button(
-            "Run All Scrapers",
-            disabled=is_running,
-            use_container_width=True,
-            type="primary",
-        ):
-            _run_command(["scrape"], "Scrape (all)")
+        selected = st.selectbox("Scraper", scraper_options, key="op_scraper")
     with col2:
-        if st.button(
-            "LinkedIn Only",
-            disabled=is_running,
-            use_container_width=True,
-        ):
-            _run_command(["scrape", "--scraper", "linkedin"], "Scrape (LinkedIn)")
+        limit = st.number_input("Limit (total results)", min_value=1, value=10, step=5, key="op_limit")
+
+    if st.button(
+        "Start Scrape",
+        disabled=is_running,
+        use_container_width=True,
+        type="primary",
+    ):
+        args: list[str] = ["scrape"]
+        if selected != "All enabled":
+            args += ["--scraper", selected]
+        args += ["--limit", str(limit)]
+        _run_command(args, f"Scrape ({selected})")
 
 
 def _render_filtering_section(session: Session) -> None:
