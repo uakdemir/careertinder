@@ -93,16 +93,37 @@ class OpenAIClient:
 
                 prompt_tokens = response.usage.prompt_tokens if response.usage else 0
                 completion_tokens = response.usage.completion_tokens if response.usage else 0
-                cost = self._estimate_cost(model, prompt_tokens, completion_tokens)
 
-                logger.info(
-                    "OpenAI API call: model=%s, tier=%s, tokens=%d+%d, cost=$%.4f",
-                    model,
-                    self._service_tier,
-                    prompt_tokens,
-                    completion_tokens,
-                    cost,
-                )
+                # Extract cached token count from prompt_tokens_details
+                cached_tokens = 0
+                if response.usage and hasattr(response.usage, "prompt_tokens_details"):
+                    details = response.usage.prompt_tokens_details
+                    if details and hasattr(details, "cached_tokens"):
+                        cached_tokens = details.cached_tokens or 0
+
+                cost = self._estimate_cost(model, prompt_tokens, completion_tokens, cached_tokens)
+
+                if cached_tokens:
+                    logger.info(
+                        "OpenAI API call: model=%s, tier=%s, tokens=%d+%d "
+                        "(cached=%d, %.0f%%), cost=$%.4f",
+                        model,
+                        self._service_tier,
+                        prompt_tokens,
+                        completion_tokens,
+                        cached_tokens,
+                        (cached_tokens / max(prompt_tokens, 1)) * 100,
+                        cost,
+                    )
+                else:
+                    logger.info(
+                        "OpenAI API call: model=%s, tier=%s, tokens=%d+%d, cost=$%.4f",
+                        model,
+                        self._service_tier,
+                        prompt_tokens,
+                        completion_tokens,
+                        cost,
+                    )
 
                 return AIResponse(
                     content=content,
@@ -162,12 +183,26 @@ class OpenAIClient:
             kwargs["temperature"] = temperature
         return self._client.chat.completions.create(**kwargs)  # type: ignore[call-overload]
 
-    def _estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
-        """Estimate USD cost from token counts and model pricing."""
+    def _estimate_cost(
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cached_tokens: int = 0,
+    ) -> float:
+        """Estimate USD cost from token counts and model pricing.
+
+        OpenAI prompt caching: cached input tokens cost 50% of base input price.
+        Caching is automatic for prompts ≥1024 tokens with matching prefixes.
+        """
         pricing = OPENAI_MODEL_PRICING.get(model)
         if pricing is None:
             logger.warning("No pricing for model '%s', cost estimated as $0.00", model)
             return 0.0
         input_price, output_price = pricing
-        cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
-        return round(cost, 6)
+        uncached_tokens = prompt_tokens - cached_tokens
+        input_cost = (
+            uncached_tokens * input_price + cached_tokens * input_price * 0.50
+        ) / 1_000_000
+        output_cost = (completion_tokens * output_price) / 1_000_000
+        return round(input_cost + output_cost, 6)

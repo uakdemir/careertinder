@@ -1,12 +1,14 @@
-Generate a cover letter for this role.
+RESUME ({resume_label}):
+{resume_text}
+
+Generate a cover letter for the following role.
+
+---
 
 ROLE: {job_title} at {company_name}
 
 JOB DESCRIPTION:
 {job_description}
-
-RESUME ({resume_label}):
-{resume_text}
 
 AI EVALUATION INSIGHTS:
 - Overall Score: {overall_score}/100 ({fit_category})
@@ -16,5 +18,3 @@ AI EVALUATION INSIGHTS:
 {weaknesses}
 - Cover Letter Hints:
 {cover_letter_hints}
-
-Write the cover letter now.

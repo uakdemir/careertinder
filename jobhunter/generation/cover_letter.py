@@ -60,7 +60,10 @@ class CoverLetterGenerator:
             return CoverLetterResult(success=False, error=msg)
 
         try:
-            user_prompt = self._build_user_prompt(job, evaluation, resume)
+            # no_autoflush prevents premature flush when lazy-loading
+            # relationships (e.g. job.company) while the session has dirty state
+            with self._session.no_autoflush:
+                user_prompt = self._build_user_prompt(job, evaluation, resume)
 
             response: AIResponse = await self._client.complete(
                 system_prompt=self._system_prompt,

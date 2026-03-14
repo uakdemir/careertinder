@@ -1,14 +1,7 @@
-Job Title: {job_title}
-Company: {company}
-Location: {location}
-Salary: {salary}
-Full Description:
-{description}
-
 Resume ({resume_label}):
 {resume_text}
 
-Evaluate this job against this resume. Respond with JSON:
+Evaluate the following job against this resume. Respond with JSON:
 {{
   "overall_score": 0-100,
   "fit_category": "exceptional_match|strong_match|moderate_match|weak_match|poor_match",
@@ -22,3 +15,12 @@ Evaluate this job against this resume. Respond with JSON:
   "reasoning": "2-3 sentence detailed analysis",
   "cover_letter_hints": ["hint for cover letter generation"]
 }}
+
+---
+
+Job Title: {job_title}
+Company: {company}
+Location: {location}
+Salary: {salary}
+Full Description:
+{description}

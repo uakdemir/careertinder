@@ -53,7 +53,10 @@ class WhyCompanyGenerator:
             WhyCompanyResult with answer_id on success.
         """
         try:
-            user_prompt = self._build_user_prompt(job, evaluation)
+            # no_autoflush prevents premature flush when lazy-loading
+            # relationships (e.g. job.company) while the session has dirty state
+            with self._session.no_autoflush:
+                user_prompt = self._build_user_prompt(job, evaluation)
 
             response: AIResponse = await self._client.complete(
                 system_prompt=self._system_prompt,

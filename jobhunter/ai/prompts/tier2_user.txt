@@ -1,12 +1,14 @@
+Candidate Summary:
+{resume_summary}
+
+Evaluate the following job posting. Respond with JSON:
+{{"decision": "yes|no|maybe", "confidence": 0.0-1.0, "reasoning": "brief explanation", "flags": ["optional_flags"]}}
+
+---
+
 Job Title: {job_title}
 Company: {company}
 Location: {location}
 Salary: {salary}
 Description (first 1500 chars):
 {description}
-
-Candidate Summary:
-{resume_summary}
-
-Evaluate this job. Respond with JSON:
-{{"decision": "yes|no|maybe", "confidence": 0.0-1.0, "reasoning": "brief explanation", "flags": ["optional_flags"]}}

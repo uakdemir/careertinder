@@ -84,7 +84,13 @@ class ClaudeClient:
                         model=model,
                         max_tokens=max_tokens,
                         temperature=temperature,
-                        system=system_prompt,
+                        system=[
+                            {
+                                "type": "text",
+                                "text": system_prompt,
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
                         messages=[{"role": "user", "content": user_prompt}],
                     )
                 )
@@ -96,7 +102,21 @@ class ClaudeClient:
 
                 prompt_tokens = response.usage.input_tokens
                 completion_tokens = response.usage.output_tokens
-                cost = self._estimate_cost(model, prompt_tokens, completion_tokens)
+
+                # Log prompt caching stats when available
+                cache_created = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+                if cache_created or cache_read:
+                    logger.info(
+                        "Claude cache: %d tokens written, %d tokens read (%.0f%% cached)",
+                        cache_created,
+                        cache_read,
+                        (cache_read / max(prompt_tokens, 1)) * 100,
+                    )
+
+                cost = self._estimate_cost(
+                    model, prompt_tokens, completion_tokens, cache_created, cache_read
+                )
 
                 logger.info(
                     "Claude API call: model=%s, tokens=%d+%d, cost=$%.4f",
@@ -139,12 +159,33 @@ class ClaudeClient:
 
         raise RuntimeError(f"Exhausted {max_retries} retries for Claude API call") from last_error
 
-    def _estimate_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
-        """Estimate USD cost from token counts and model pricing."""
+    def _estimate_cost(
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
+    ) -> float:
+        """Estimate USD cost from token counts and model pricing.
+
+        Anthropic prompt caching pricing:
+        - Cache writes: 25% more than base input price
+        - Cache reads: 90% less than base input price
+        - Uncached input: base price
+        """
         pricing = MODEL_PRICING.get(model)
         if pricing is None:
             logger.warning("No pricing for model '%s', cost estimated as $0.00", model)
             return 0.0
         input_price, output_price = pricing
-        cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
-        return round(cost, 6)
+
+        # Tokens not involved in caching
+        uncached_tokens = prompt_tokens - cache_creation_tokens - cache_read_tokens
+        input_cost = (
+            uncached_tokens * input_price
+            + cache_creation_tokens * input_price * 1.25  # 25% premium for writes
+            + cache_read_tokens * input_price * 0.10  # 90% discount for reads
+        ) / 1_000_000
+        output_cost = (completion_tokens * output_price) / 1_000_000
+        return round(input_cost + output_cost, 6)

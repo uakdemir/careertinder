@@ -9,6 +9,6 @@ Writing guidelines:
 - Address the remote-from-Turkey arrangement positively (timezone overlap
   with US/EU, proven remote track record).
 - Keep the tone confident but not arrogant, professional but not stiff.
-- Target length: 300-400 words.
+- Target length: 200-300 words.
 - Output clean prose only — no placeholders, no markdown headers, no
   meta-commentary.
