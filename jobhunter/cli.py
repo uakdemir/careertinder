@@ -1,11 +1,12 @@
 import asyncio
 import logging
+import math
 from pathlib import Path
 
 import click
 
 from jobhunter.config.loader import load_config
-from jobhunter.config.schema import AppConfig, ConfigurationError, SecretsConfig
+from jobhunter.config.schema import AppConfig, ConfigurationError, ScrapingConfig, SecretsConfig
 from jobhunter.utils.logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,32 @@ def _load_config(ctx: click.Context) -> AppConfig:
     return config
 
 
+def _apply_limit(scraping: ScrapingConfig, limit: int, scraper: str | None) -> ScrapingConfig:
+    """Override scraping config with a result limit.
+
+    Apify scrapers (linkedin, wellfound): sets max_results = limit.
+    Playwright scrapers (remote_io, remote_rocketship): sets each profile's
+    max_pages = ceil(limit / num_profiles), minimum 1.
+
+    Uses model_copy to preserve all existing profile fields regardless of
+    profile names or future schema additions.
+    """
+    updates: dict[str, object] = {}
+    targets = [scraper] if scraper else ["linkedin", "wellfound", "remote_io", "remote_rocketship"]
+
+    for name in targets:
+        cfg = getattr(scraping, name)
+        if name in ("linkedin", "wellfound"):
+            updates[name] = cfg.model_copy(update={"max_results": limit})
+        elif name in ("remote_io", "remote_rocketship"):
+            profiles = cfg.search_profiles
+            pages_per = max(1, math.ceil(limit / max(len(profiles), 1)))
+            new_profiles = [p.model_copy(update={"max_pages": pages_per}) for p in profiles]
+            updates[name] = cfg.model_copy(update={"search_profiles": new_profiles})
+
+    return scraping.model_copy(update=updates)
+
+
 @cli.command()
 @click.option(
     "--scraper",
@@ -41,13 +68,20 @@ def _load_config(ctx: click.Context) -> AppConfig:
     default=None,
     help="Run a specific scraper (default: all enabled)",
 )
+@click.option(
+    "--limit",
+    type=int,
+    default=None,
+    help="Max total results (divided across search profiles)",
+)
 @click.pass_context
-def scrape(ctx: click.Context, scraper: str | None) -> None:
+def scrape(ctx: click.Context, scraper: str | None, limit: int | None) -> None:
     """Run job scrapers to collect new postings."""
     config = _load_config(ctx)
     secrets = SecretsConfig()
 
     from jobhunter.db.session import create_engine, get_session
+    from jobhunter.db.settings import get_scraping_config
     from jobhunter.scrapers.orchestrator import ScraperOrchestrator, ScraperRunResult
 
     create_engine(config.database)
@@ -64,7 +98,14 @@ def scrape(ctx: click.Context, scraper: str | None) -> None:
 
     async def _run() -> None:
         with get_session() as session:
-            orchestrator = ScraperOrchestrator(config, secrets, session)
+            # Load scraping config from DB (overrides YAML) — matches
+            # the pattern in 8_scraper_runs.py so profile renames,
+            # URL changes, etc. made in the dashboard are respected.
+            db_scraping = get_scraping_config(session)
+            if limit is not None:
+                db_scraping = _apply_limit(db_scraping, limit, scraper)
+            effective_config = config.model_copy(update={"scraping": db_scraping})
+            orchestrator = ScraperOrchestrator(effective_config, secrets, session)
             if scraper:
                 result = await orchestrator.run_single(scraper)
                 _print_scraper_result(result)

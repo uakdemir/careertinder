@@ -13,16 +13,24 @@ def configure_logging(verbose: bool = False) -> None:
     - Root logger: WARNING level
     - jobhunter.* loggers: INFO (or DEBUG if verbose)
     - File handler: rotating, daily, 30-day retention, logs/ directory
-    - Error file handler: ERROR+ only, written to tmp/error_logs.txt
+    - Error file handler: ERROR+ only, written to tmp/error_logs.txt (overwritten on restart)
     - Console handler: human-readable format
+
+    Safe to call multiple times — skips if handlers are already configured.
     """
+    app_logger = logging.getLogger("jobhunter")
+
+    # Guard: skip if already configured to prevent duplicate handlers
+    if app_logger.handlers:
+        app_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+        return
+
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.WARNING)
 
-    app_logger = logging.getLogger("jobhunter")
     app_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
     formatter = logging.Formatter(LOG_FORMAT)
@@ -46,9 +54,10 @@ def configure_logging(verbose: bool = False) -> None:
     app_logger.addHandler(file_handler)
 
     # Error-only file handler (tmp/error_logs.txt) for AI-assisted debugging
+    # mode="w" overwrites on each app restart so the file stays small
     error_handler = logging.FileHandler(
         filename=ERROR_LOG_PATH,
-        mode="a",
+        mode="w",
         encoding="utf-8",
     )
     error_handler.setFormatter(formatter)
